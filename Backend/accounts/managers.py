@@ -2,12 +2,11 @@ from django.contrib.auth.base_user import BaseUserManager
 
 
 class UserManager(BaseUserManager):
-    """Custom manager for the email-based user model."""
+   
 
     use_in_migrations = True
 
     def create_user(self, email, password=None, **extra_fields):
-        """Create and save a regular user."""
         if not email:
             raise ValueError("The email must be set.")
 
@@ -18,7 +17,6 @@ class UserManager(BaseUserManager):
         return user
 
     def create_superuser(self, email, password=None, **extra_fields):
-        """Create and save a superuser."""
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)

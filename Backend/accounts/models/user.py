@@ -1,7 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 
-from core.managers import UserManager
+from accounts.managers import UserManager
 
 
 class User(AbstractBaseUser, PermissionsMixin):
@@ -10,8 +10,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True, db_index=True)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
+    # Connect each user to exactly one RBAC role.
     role = models.ForeignKey(
-        "core.Role",
+        "accounts.Role",
         on_delete=models.PROTECT,
         related_name="users",
     )
