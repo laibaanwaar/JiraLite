@@ -555,3 +555,359 @@ class UserDetailApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data["data"]["role"]["is_active"])
+
+
+class UserDetailUpdateApiTests(APITestCase):
+    """Tests for PATCH /api/users/{id}/"""
+
+    def setUp(self):
+        self.admin_role = Role.objects.create(
+            name="Admin",
+            code="admin",
+            description="Administrator role",
+            is_active=True,
+        )
+        self.engineer_role = Role.objects.create(
+            name="Engineer",
+            code="engineer",
+            description="Engineer role",
+            is_active=True,
+        )
+        self.task_manager_role = Role.objects.create(
+            name="Task Manager",
+            code="task_manager",
+            description="Task Manager role",
+            is_active=True,
+        )
+        self.inactive_role = Role.objects.create(
+            name="Inactive",
+            code="inactive",
+            description="Inactive role",
+            is_active=False,
+        )
+
+        self.admin_user = cast(Any, User.objects).create_user(
+            email="admin@example.com",
+            password="AdminPass123!",
+            first_name="Admin",
+            last_name="User",
+            role=self.admin_role,
+            is_active=True,
+        )
+        self.engineer_user = cast(Any, User.objects).create_user(
+            email="engineer@example.com",
+            password="EngPass123!",
+            first_name="Engineer",
+            last_name="User",
+            role=self.engineer_role,
+            is_active=True,
+        )
+        self.other_user = cast(Any, User.objects).create_user(
+            email="other@example.com",
+            password="OtherPass123!",
+            first_name="Other",
+            last_name="User",
+            role=self.task_manager_role,
+            is_active=True,
+        )
+
+    def _auth(self, user=None):
+        target = user or self.admin_user
+        refresh = RefreshToken.for_user(target)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
+
+    def _get_url(self, user_id):
+        return reverse("user-detail", kwargs={"user_id": user_id})
+
+    def _payload(self, **overrides):
+        base = {
+            "first_name": "Updated",
+            "last_name": "Name",
+            "email": "updated@example.com",
+            "role_id": self.task_manager_role.id,
+        }
+        base.update(overrides)
+        return base
+
+    def test_patch_user_detail_success(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["first_name"], "Updated")
+        self.assertEqual(response.data["data"]["email"], "updated@example.com")
+        self.assertEqual(response.data["data"]["role"]["code"], "task_manager")
+
+    def test_patch_user_detail_allows_partial_update(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, {"first_name": "Partial"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["first_name"], "Partial")
+        self.assertEqual(response.data["data"]["last_name"], "User")
+
+    def test_patch_user_detail_empty_payload_rejected(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("message", response.data)
+
+    def test_patch_user_detail_password_field_rejected(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(
+            url,
+            {"password": "NewPass123!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("only first_name", response.data["message"].lower())
+
+    def test_patch_user_detail_invalid_email_rejected(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, {"email": "not-an-email"}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_user_detail_duplicate_email_rejected(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(
+            url,
+            {"email": self.admin_user.email},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+    def test_patch_user_detail_role_not_found(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, {"role_id": 9999}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_patch_user_detail_inactive_role_rejected(self):
+        self._auth()
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(
+            url,
+            {"role_id": self.inactive_role.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_cannot_remove_own_admin_role(self):
+        self._auth()
+        url = self._get_url(self.admin_user.id)
+        response = self.client.patch(
+            url,
+            {"role_id": self.engineer_role.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.admin_user.refresh_from_db()
+        self.assertEqual(self.admin_user.role.code, "admin")
+
+    def test_patch_user_detail_invalid_user_id_zero(self):
+        self._auth()
+        url = self._get_url(0)
+        response = self.client.patch(url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_user_detail_invalid_user_id_negative(self):
+        self._auth()
+        url = self._get_url(-1)
+        response = self.client.patch(url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_user_detail_nonexistent_id(self):
+        self._auth()
+        url = self._get_url(9999)
+        response = self.client.patch(url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_patch_user_detail_unauthenticated_rejected(self):
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_patch_user_detail_non_admin_rejected(self):
+        self._auth(self.other_user)
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class UserDeactivateApiTests(APITestCase):
+    """Tests for PATCH /api/users/{id}/deactivate/"""
+
+    def setUp(self):
+        self.admin_role = Role.objects.create(
+            name="Admin",
+            code="admin",
+            description="Administrator role",
+            is_active=True,
+        )
+        self.engineer_role = Role.objects.create(
+            name="Engineer",
+            code="engineer",
+            description="Engineer role",
+            is_active=True,
+        )
+        self.task_manager_role = Role.objects.create(
+            name="Task Manager",
+            code="task_manager",
+            description="Task Manager role",
+            is_active=True,
+        )
+
+        self.admin_user = cast(Any, User.objects).create_user(
+            email="admin@example.com",
+            password="AdminPass123!",
+            first_name="Admin",
+            last_name="User",
+            role=self.admin_role,
+            is_active=True,
+        )
+        self.second_admin = cast(Any, User.objects).create_user(
+            email="admin2@example.com",
+            password="AdminPass123!",
+            first_name="Second",
+            last_name="Admin",
+            role=self.admin_role,
+            is_active=True,
+        )
+        self.engineer_user = cast(Any, User.objects).create_user(
+            email="engineer@example.com",
+            password="EngPass123!",
+            first_name="Engineer",
+            last_name="User",
+            role=self.engineer_role,
+            is_active=True,
+        )
+        self.inactive_user = cast(Any, User.objects).create_user(
+            email="inactive@example.com",
+            password="InactivePass123!",
+            first_name="Inactive",
+            last_name="User",
+            role=self.task_manager_role,
+            is_active=False,
+        )
+
+    def _auth(self, user=None):
+        target = user or self.admin_user
+        refresh = RefreshToken.for_user(target)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
+
+    def _get_url(self, user_id):
+        return reverse("user-deactivate", kwargs={"user_id": user_id})
+
+    def test_deactivate_user_success(self):
+        self._auth(self.second_admin)
+        refresh_token = str(RefreshToken.for_user(self.engineer_user))
+        url = self._get_url(self.engineer_user.id)
+
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.engineer_user.refresh_from_db()
+        self.assertFalse(self.engineer_user.is_active)
+
+        refresh_response = self.client.post(
+            reverse("auth-refresh"),
+            {"refresh": refresh_token},
+            format="json",
+        )
+        self.assertEqual(refresh_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_deactivate_user_missing_token_rejected(self):
+        url = self._get_url(self.engineer_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_deactivate_user_invalid_access_token_rejected(self):
+        url = self._get_url(self.engineer_user.id)
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-valid-token")
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_deactivate_user_expired_access_token_rejected(self):
+        url = self._get_url(self.engineer_user.id)
+        token = RefreshToken.for_user(self.admin_user).access_token
+        token["exp"] = 1
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(token)}")
+
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_deactivate_user_non_admin_rejected(self):
+        self._auth(self.engineer_user)
+        url = self._get_url(self.admin_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_deactivate_user_invalid_id_string(self):
+        self._auth()
+        url = self._get_url("invalid")
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_deactivate_user_invalid_id_negative(self):
+        self._auth()
+        url = self._get_url(-1)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_deactivate_user_not_found(self):
+        self._auth()
+        url = self._get_url(9999)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_deactivate_user_already_inactive(self):
+        self._auth()
+        url = self._get_url(self.inactive_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+    def test_deactivate_user_self_deactivation_blocked(self):
+        self._auth(self.admin_user)
+        url = self._get_url(self.admin_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.admin_user.refresh_from_db()
+        self.assertTrue(self.admin_user.is_active)
+
+    def test_deactivate_last_active_admin_blocked(self):
+        self.second_admin.is_active = False
+        self.second_admin.save(update_fields=["is_active"])
+        self._auth()
+        url = self._get_url(self.admin_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.admin_user.refresh_from_db()
+        self.assertTrue(self.admin_user.is_active)
