@@ -1,9 +1,11 @@
 import logging
+from typing import Any, cast
 
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, OperationalError, transaction
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings
+from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -67,7 +69,7 @@ class AuthService:
 
         try:
             with transaction.atomic():
-                token = RefreshToken(refresh_token)
+                token = RefreshToken(cast(Any, refresh_token))
                 user_id = token.payload.get(api_settings.USER_ID_CLAIM)
                 token_jti = token.payload.get(api_settings.JTI_CLAIM)
 
@@ -139,6 +141,93 @@ class AuthService:
             }
         except Exception:
             logger.exception("Unexpected error while refreshing token.")
+            return {
+                "success": False,
+                "message": "Authentication service unavailable.",
+            }
+
+    @staticmethod
+    def logout_refresh_token(*, refresh_token: str) -> dict:
+        try:
+            token = UntypedToken(cast(Any, refresh_token))
+            token_type = token.payload.get(api_settings.TOKEN_TYPE_CLAIM)
+
+            if token_type != "refresh":
+                return {
+                    "success": False,
+                    "message": "Invalid or expired refresh token.",
+                }
+
+            with transaction.atomic():
+                refresh = RefreshToken(cast(Any, refresh_token), verify=False)
+                refresh.blacklist()
+
+            return {
+                "success": True,
+                "message": "Logout successful.",
+            }
+        except TokenError:
+            return {
+                "success": False,
+                "message": "Invalid or expired refresh token.",
+            }
+        except (DatabaseError, OperationalError):
+            logger.exception("Logout request failed due to database error.")
+            return {
+                "success": False,
+                "message": "Authentication service unavailable.",
+            }
+        except Exception:
+            logger.exception("Unexpected error while logging out.")
+            return {
+                "success": False,
+                "message": "Authentication service unavailable.",
+            }
+
+    @staticmethod
+    def get_current_user_profile(*, user) -> dict:
+        try:
+            if user is None:
+                return {
+                    "success": False,
+                    "message": "User not found.",
+                }
+
+            if not user.is_active:
+                return {
+                    "success": False,
+                    "message": "Your account is inactive.",
+                }
+
+            if hasattr(user, "role") and user.role and not user.role.is_active:
+                return {
+                    "success": False,
+                    "message": "Your role is inactive.",
+                }
+
+            return {
+                "success": True,
+                "message": "Profile fetched successfully.",
+                "data": {
+                    "id": user.id,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email,
+                    "role": user.role.name if user.role else None,
+                    "role_code": user.role.code if user.role else None,
+                    "is_active": user.is_active,
+                    "is_staff": user.is_staff,
+                    "date_joined": user.date_joined,
+                },
+            }
+        except (DatabaseError, OperationalError):
+            logger.exception("Profile request failed due to database error.")
+            return {
+                "success": False,
+                "message": "Authentication service unavailable.",
+            }
+        except Exception:
+            logger.exception("Unexpected error while fetching user profile.")
             return {
                 "success": False,
                 "message": "Authentication service unavailable.",

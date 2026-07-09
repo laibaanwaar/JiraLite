@@ -1,31 +1,27 @@
 import logging
 
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.serializers import RefreshTokenSerializer
+from accounts.authentication import SafeJWTAuthentication
 from accounts.services.auth_service import AuthService
+from accounts.services.permissions import IsActiveAuthenticatedUser
 
 logger = logging.getLogger(__name__)
 
 
-class RefreshTokenView(APIView):
-    """Issue a new access token from a valid refresh token."""
+class MeView(APIView):
+    """Return the authenticated user's profile."""
 
-    permission_classes = [AllowAny]
+    authentication_classes = [SafeJWTAuthentication]
+    permission_classes = [IsActiveAuthenticatedUser]
 
-    def post(self, request):
-        serializer = RefreshTokenSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
+    def get(self, request):
         try:
-            result = AuthService.refresh_access_token(
-                refresh_token=serializer.validated_data["refresh"],
-            )
+            result = AuthService.get_current_user_profile(user=request.user)
         except Exception:
-            logger.exception("Unexpected error while refreshing token.")
+            logger.exception("Unexpected error while fetching user profile.")
             return Response(
                 {"message": "Authentication service unavailable."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -33,12 +29,14 @@ class RefreshTokenView(APIView):
 
         if not result["success"]:
             message = result["message"]
-            if message == "Invalid or expired refresh token.":
-                response_status = status.HTTP_401_UNAUTHORIZED
+            if message in ("Your account is inactive.", "Your role is inactive."):
+                response_status = status.HTTP_403_FORBIDDEN
+            elif message == "User not found.":
+                response_status = status.HTTP_404_NOT_FOUND
             elif message == "Authentication service unavailable.":
                 response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
             else:
-                response_status = status.HTTP_403_FORBIDDEN
+                response_status = status.HTTP_400_BAD_REQUEST
 
             return Response({"message": message}, status=response_status)
 
@@ -49,3 +47,4 @@ class RefreshTokenView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+

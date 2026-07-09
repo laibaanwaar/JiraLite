@@ -5,27 +5,27 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.serializers import RefreshTokenSerializer
+from accounts.serializers import LogoutSerializer
 from accounts.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
 
-class RefreshTokenView(APIView):
-    """Issue a new access token from a valid refresh token."""
+class LogoutView(APIView):
+    """Blacklist a refresh token and end the session."""
 
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = RefreshTokenSerializer(data=request.data)
+        serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         try:
-            result = AuthService.refresh_access_token(
+            result = AuthService.logout_refresh_token(
                 refresh_token=serializer.validated_data["refresh"],
             )
         except Exception:
-            logger.exception("Unexpected error while refreshing token.")
+            logger.exception("Unexpected error while logging out.")
             return Response(
                 {"message": "Authentication service unavailable."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -43,9 +43,6 @@ class RefreshTokenView(APIView):
             return Response({"message": message}, status=response_status)
 
         return Response(
-            {
-                "message": result["message"],
-                "data": result["data"],
-            },
+            {"message": result["message"]},
             status=status.HTTP_200_OK,
         )

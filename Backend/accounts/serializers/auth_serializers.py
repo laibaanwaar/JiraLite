@@ -36,3 +36,22 @@ class RefreshTokenSerializer(serializers.Serializer):
         if not value.strip():
             raise serializers.ValidationError(_("Refresh token is required."))
         return value.strip()
+
+
+class LogoutSerializer(serializers.Serializer):
+    """Validate logout payload."""
+
+    refresh = serializers.CharField(
+        required=True,
+        allow_null=True,
+        write_only=True,
+        trim_whitespace=False,
+    )
+
+    def validate_refresh(self, value):
+        if value is None:
+            raise serializers.ValidationError(_("Refresh token is required."))
+
+        if not value.strip():
+            raise serializers.ValidationError(_("Refresh token is required."))
+        return value.strip()
