@@ -1,0 +1,14 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/Backend/venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/Backend",
+    "${workspaceFolder}/Backend/venv/Lib/site-packages"
+  ],
+  "python.analysis.pythonPath": "${workspaceFolder}/Backend/venv/Scripts/python.exe",
+  "python.analysis.typeCheckingMode": "off",
+  "pyrefly.pythonInterpreter": "${workspaceFolder}/Backend/venv/Scripts/python.exe",
+  "pyrefly.disableLanguageServices": true,
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.python"
+  }
+}
