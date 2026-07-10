@@ -1,3 +1,6 @@
 from .auth_serializers import LoginSerializer, LogoutSerializer, RefreshTokenSerializer
+from .create_role_serializer import CreateRoleSerializer
 from .create_user_serializer import CreateUserSerializer
+from .role_serializer import RoleSerializer
 from .update_user_serializer import UpdateUserSerializer
+from .update_role_serializer import UpdateRoleSerializer

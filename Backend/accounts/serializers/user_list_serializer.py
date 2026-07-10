@@ -1,11 +1,6 @@
 from rest_framework import serializers
 
-
-class RoleSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    name = serializers.CharField()
-    code = serializers.CharField()
-    is_active = serializers.BooleanField()
+from accounts.serializers.role_serializer import RoleSerializer
 
 
 class UserListSerializer(serializers.Serializer):

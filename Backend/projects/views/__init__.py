@@ -1,0 +1,5 @@
+from .create_project_view import CreateProjectView
+from .archive_project_view import ArchiveProjectView
+from .list_project_view import ProjectListView
+from .project_detail_view import ProjectDetailView
+from .update_project_view import UpdateProjectView

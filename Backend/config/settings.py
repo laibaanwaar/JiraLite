@@ -54,6 +54,7 @@ INSTALLED_APPS = [
 
     # Local Apps
     'accounts.apps.AccountsConfig',
+    'projects.apps.ProjectsConfig',
 ]
 AUTH_USER_MODEL = "accounts.User"
 MIDDLEWARE = [

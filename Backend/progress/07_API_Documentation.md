@@ -35,14 +35,22 @@
 ### `GET /api/roles/`
 - Purpose: List roles
 - Access: Admin
+- Response: role details, including `users_count`
 
 ### `POST /api/roles/`
 - Purpose: Create a role
 - Access: Admin
+- Response: created role details, including `users_count`
+
+### `GET /api/roles/{id}/`
+- Purpose: View role details
+- Access: Admin
+- Response: role details, including `users_count`
 
 ### `PATCH /api/roles/{id}/`
-- Purpose: Update a role
+- Purpose: Update role details
 - Access: Admin
+- Response: updated role details, including `users_count`
 
 ## Module: Users
 
@@ -53,6 +61,7 @@
 ### `POST /api/users/`
 - Purpose: Create a user
 - Access: Admin
+- Note: Uses the same `/api/users/` resource as the list endpoint.
 
 ### `GET /api/users/{id}/`
 - Purpose: View user details

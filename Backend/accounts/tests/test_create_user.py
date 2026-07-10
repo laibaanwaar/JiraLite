@@ -32,7 +32,7 @@ class CreateUserApiTests(APITestCase):
             last_name="User",
             role=self.admin_role,
         )
-        self.url = reverse("user-create")
+        self.url = reverse("user-list")
 
     def _auth(self, user=None):
         """Attach a valid JWT access token for the given user."""
