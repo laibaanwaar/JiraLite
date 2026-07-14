@@ -59,6 +59,8 @@ class TaskService:
             "priority": task.priority,
             "status": task.status,
             "due_date": task.due_date,
+            "project_id": task.project_id,
+            "assigned_to_id": task.assigned_to_id,
             "project": TaskService._build_project_payload(task.project),
             "assigned_to": TaskService._build_user_payload(task.assigned_to),
             "created_by": TaskService._build_user_payload(task.created_by),

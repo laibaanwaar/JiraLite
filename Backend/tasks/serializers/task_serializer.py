@@ -13,6 +13,8 @@ class TaskSerializer(serializers.Serializer):
     priority = serializers.CharField()
     status = serializers.CharField()
     due_date = serializers.DateField(allow_null=True)
+    project_id = serializers.IntegerField()
+    assigned_to_id = serializers.IntegerField()
     project = ProjectDetailSerializer()
     assigned_to = ProjectOwnerSerializer()
     created_by = ProjectOwnerSerializer()

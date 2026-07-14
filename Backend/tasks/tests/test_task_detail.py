@@ -45,6 +45,8 @@ class TaskDetailApiTests(APITestCase):
         response = self.client.get(self.url, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["data"]["title"], "Implement login API")
+        self.assertEqual(response.data["data"]["project_id"], self.project.id)
+        self.assertEqual(response.data["data"]["assigned_to_id"], self.engineer_user.id)
         self.assertEqual(response.data["data"]["priority"], Task.PRIORITY_HIGH)
         self.assertEqual(response.data["data"]["status"], Task.STATUS_IN_PROGRESS)
         self.assertEqual(response.data["data"]["project"]["id"], self.project.id)

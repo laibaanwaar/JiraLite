@@ -48,6 +48,8 @@ class TaskUpdateApiTests(APITestCase):
         response = self.client.patch(self.url, {"title": "Updated Task", "priority": Task.PRIORITY_HIGH, "status": Task.STATUS_DONE, "due_date": "2026-12-31", "assigned_to_id": self.other_engineer_user.id}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["data"]["title"], "Updated Task")
+        self.assertEqual(response.data["data"]["project_id"], self.project.id)
+        self.assertEqual(response.data["data"]["assigned_to_id"], self.other_engineer_user.id)
         self.assertEqual(response.data["data"]["priority"], Task.PRIORITY_HIGH)
         self.assertEqual(response.data["data"]["status"], Task.STATUS_DONE)
         self.assertEqual(response.data["data"]["assigned_to"]["email"], self.other_engineer_user.email)

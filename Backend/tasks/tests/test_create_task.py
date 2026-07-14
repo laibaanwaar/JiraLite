@@ -132,6 +132,8 @@ class CreateTaskApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["data"]["title"], "Implement login API")
+        self.assertEqual(response.data["data"]["project_id"], self.project.id)
+        self.assertEqual(response.data["data"]["assigned_to_id"], self.engineer_user.id)
         self.assertEqual(response.data["data"]["project"]["id"], self.project.id)
         self.assertEqual(response.data["data"]["assigned_to"]["email"], self.engineer_user.email)
         self.assertEqual(response.data["data"]["created_by"]["email"], self.admin_user.email)
