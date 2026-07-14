@@ -1,0 +1,23 @@
+# Project-local generated files and caches
+.cache/
+
+# Python
+Backend/venv/
+Backend/.venv/
+Backend/**/__pycache__/
+Backend/.pytest_cache/
+Backend/.mypy_cache/
+Backend/.ruff_cache/
+*.py[cod]
+
+# Frontend
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.cache/
+
+# Environment files
+Backend/.env
+Frontend/.env
+
+# IDE
+.vscode/*.code-workspace

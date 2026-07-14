@@ -236,7 +236,7 @@ class TaskService:
         return {"success": True, "message": "Task retrieved successfully.", "data": TaskService._build_task_payload(task_result["data"])}
 
     @staticmethod
-    def create_task(*, title: str, description: str = "", project_id: int, assigned_to_id: int, created_by_id: int) -> dict:
+    def create_task(*, title: str, description: str = "", priority: str = Task.PRIORITY_MEDIUM, status: str = Task.STATUS_TODO, due_date=None, project_id: int, assigned_to_id: int, created_by_id: int) -> dict:
         try:
             project_value = int(project_id)
         except (TypeError, ValueError):
@@ -284,6 +284,9 @@ class TaskService:
                 task = cast(Any, Task.objects).create(
                     title=title,
                     description=description,
+                    priority=priority,
+                    status=status,
+                    due_date=due_date,
                     project=project,
                     assigned_to=assigned_user,
                     created_by=creator,

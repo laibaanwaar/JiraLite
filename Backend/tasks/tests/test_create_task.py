@@ -136,6 +136,23 @@ class CreateTaskApiTests(APITestCase):
         self.assertEqual(response.data["data"]["assigned_to"]["email"], self.engineer_user.email)
         self.assertEqual(response.data["data"]["created_by"]["email"], self.admin_user.email)
 
+    def test_create_task_accepts_priority_status_and_due_date(self):
+        self._auth()
+        response = self.client.post(
+            self.url,
+            self._payload(
+                priority=Task.PRIORITY_HIGH,
+                status=Task.STATUS_IN_PROGRESS,
+                due_date="2026-12-31",
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["priority"], Task.PRIORITY_HIGH)
+        self.assertEqual(response.data["data"]["status"], Task.STATUS_IN_PROGRESS)
+        self.assertEqual(response.data["data"]["due_date"], "2026-12-31")
+
     def test_create_task_defaults_description_blank(self):
         self._auth()
         payload = self._payload()

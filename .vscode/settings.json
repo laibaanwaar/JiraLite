@@ -8,6 +8,17 @@
   "python.analysis.typeCheckingMode": "off",
   "pyrefly.pythonInterpreter": "${workspaceFolder}/Backend/venv/Scripts/python.exe",
   "pyrefly.disableLanguageServices": true,
+  "terminal.integrated.env.windows": {
+    "PROJECT_ROOT": "${workspaceFolder}",
+    "PROJECT_CACHE_ROOT": "${workspaceFolder}\\.cache",
+    "TMP": "${workspaceFolder}\\.cache\\tmp",
+    "TEMP": "${workspaceFolder}\\.cache\\tmp",
+    "npm_config_cache": "${workspaceFolder}\\.cache\\npm",
+    "PIP_CACHE_DIR": "${workspaceFolder}\\.cache\\pip",
+    "PYTHONPYCACHEPREFIX": "${workspaceFolder}\\.cache\\python",
+    "VITE_CACHE_DIR": "${workspaceFolder}\\.cache\\vite",
+    "PIPENV_VENV_IN_PROJECT": "1"
+  },
   "[python]": {
     "editor.defaultFormatter": "ms-python.python"
   }

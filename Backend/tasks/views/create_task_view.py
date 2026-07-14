@@ -3,6 +3,7 @@ import logging
 from rest_framework import status
 from rest_framework.response import Response
 
+from tasks.models.task import Task
 from tasks.serializers.create_task_serializer import CreateTaskSerializer
 from tasks.serializers.task_serializer import TaskSerializer
 from tasks.services.task_service import TaskService
@@ -23,6 +24,9 @@ class CreateTaskView(TaskListView):
             result = TaskService.create_task(
                 title=serializer.validated_data["title"],
                 description=serializer.validated_data.get("description", ""),
+                priority=serializer.validated_data.get("priority", Task.PRIORITY_MEDIUM),
+                status=serializer.validated_data.get("status", Task.STATUS_TODO),
+                due_date=serializer.validated_data.get("due_date"),
                 project_id=serializer.validated_data["project_id"],
                 assigned_to_id=serializer.validated_data["assigned_to_id"],
                 created_by_id=request.user.id,

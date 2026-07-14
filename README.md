@@ -1,51 +1,49 @@
-# Task Management System Backend
+# JiraLite
 
-A Django REST Framework backend for a Jira-inspired Task Management System with PostgreSQL, JWT authentication, and role-based access control.
+JiraLite is a Jira-inspired task management system with a React frontend and a Django REST Framework backend.
 
-This repository currently contains the backend project scaffold and the documentation needed to plan and implement the full system.
+## Project-local tooling storage
 
-## Documentation
+This repository is configured to keep project-controlled caches, generated files, and development tooling data on `D:\JiraLite` wherever the tools support local overrides.
 
-All project documentation is stored in [`progress/`](./progress/):
+### Current project-local paths
 
-- [`01_Project_Overview.md`](./progress/01_Project_Overview.md)
-- [`02_Technology_Stack.md`](./progress/02_Technology_Stack.md)
-- [`03_User_Stories.md`](./progress/03_User_Stories.md)
-- [`04_Product_Backlog.md`](./progress/04_Product_Backlog.md)
-- [`05_Sprint_Planning.md`](./progress/05_Sprint_Planning.md)
-- [`06_ERD_and_Database.md`](./progress/06_ERD_and_Database.md)
-- [`07_API_Documentation.md`](./progress/07_API_Documentation.md)
-- [`08_Authentication_and_RBAC.md`](./progress/08_Authentication_and_RBAC.md)
-- [`09_Project_Structure.md`](./progress/09_Project_Structure.md)
-- [`10_Development_Log.md`](./progress/10_Development_Log.md)
-- [`11_Test_Cases.md`](./progress/11_Test_Cases.md)
-- [`12_Bugs_and_Fixes.md`](./progress/12_Bugs_and_Fixes.md)
-- [`13_Deployment.md`](./progress/13_Deployment.md)
-- [`14_Future_Enhancements.md`](./progress/14_Future_Enhancements.md)
+- Python virtual environment: `Backend\venv`
+- npm dependencies: `Frontend\node_modules`
+- frontend build output: `Frontend\dist`
+- npm cache: `.cache\npm`
+- Vite cache: `.cache\vite`
+- pip cache: `.cache\pip`
+- Python bytecode cache: `.cache\python`
+- temp directories for wrapper-driven commands: `.cache\tmp`
 
-## Current Backend Status
+## Recommended commands
 
-- Django project scaffold created in `config/`
-- Local app scaffold available in `core/`
-- JWT authentication configured in `settings.py`
-- CORS enabled for the React frontend
-- Database currently uses SQLite for development
+Run commands from the project root with the wrapper scripts so Windows tooling uses the project-local cache directories on `D:`.
 
-## Planned Core Capabilities
+### Frontend
 
-- Admin user management
-- Task manager project and task operations
-- Engineer task collaboration
-- Audit logging and task history
-- React frontend integration
+- `scripts\frontend.cmd install`
+- `scripts\frontend.cmd run dev`
+- `scripts\frontend.cmd run build`
+- `scripts\frontend.cmd run lint`
 
-## Tech Stack
+### Backend
 
-- Backend: Django REST Framework
-- Authentication: JWT
-- Database: PostgreSQL in production
-- Frontend: React, Tailwind CSS, Axios
+- `scripts\backend-manage.cmd check`
+- `scripts\backend-manage.cmd runserver`
+- `scripts\backend-manage.cmd test`
+- `scripts\backend-python.cmd -m pip list`
 
-## Project Goal
+### PowerShell variants
 
-Deliver a secure, modular, role-aware task management platform that supports project planning, task assignment, team collaboration, and traceable activity across the organization.
+- `./scripts/frontend.ps1 run build`
+- `./scripts/backend-manage.ps1 check`
+- `./scripts/backend-python.ps1 -m pip cache dir`
+
+## Notes
+
+- VS Code integrated terminals inherit the same project-local cache and temp paths through `.vscode/settings.json`.
+- Backend wrapper scripts also load `Backend\.env` so project settings win over conflicting global environment variables.
+- Existing secrets in `Backend\.env` are left untouched.
+- Some global tools may still use system-managed locations if they do not support per-project cache overrides, but the main React, npm, Vite, Python, pip, and Django workflows are redirected into this repository.
