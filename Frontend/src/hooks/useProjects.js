@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { createProject, getProjects } from '../services/projectService'
+import { assignProjectMember, createProject, getProjects } from '../services/projectService'
+import { getUsers } from '../services/userService'
 
 const INITIAL_FORM_DATA = {
-  addUser: '',
+  projectMembers: [],
   projectName: '',
   projectKey: '',
   description: '',
@@ -15,6 +16,7 @@ const INITIAL_FORM_DATA = {
 export function useProjects() {
   const [projects, setProjects] = useState([])
   const [ownerOptions, setOwnerOptions] = useState([])
+  const [memberOptions, setMemberOptions] = useState([])
   const [summary, setSummary] = useState({
     activeProjects: 0,
     archivedProjects: 0,
@@ -23,8 +25,10 @@ export function useProjects() {
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
+  const [isUsersLoading, setIsUsersLoading] = useState(true)
   const [listError, setListError] = useState('')
   const [createError, setCreateError] = useState('')
+  const [usersError, setUsersError] = useState('')
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [formData, setFormData] = useState(INITIAL_FORM_DATA)
 
@@ -35,7 +39,6 @@ export function useProjects() {
     try {
       const response = await getProjects()
       setProjects(response.projects)
-      setOwnerOptions(response.ownerOptions)
       setSummary(response.summary)
       setTotalCount(response.totalCount)
     } catch (error) {
@@ -48,6 +51,33 @@ export function useProjects() {
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
+
+  const loadUsers = useCallback(async () => {
+    setIsUsersLoading(true)
+    setUsersError('')
+
+    try {
+      const response = await getUsers()
+      const options = response.users.map((user) => ({
+        value: String(user.id),
+        label: user.name,
+        description: user.email,
+      }))
+
+      setOwnerOptions(options)
+      setMemberOptions(options)
+    } catch (error) {
+      setOwnerOptions([])
+      setMemberOptions([])
+      setUsersError(error.message)
+    } finally {
+      setIsUsersLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadUsers()
+  }, [loadUsers])
 
   const openCreateModal = () => {
     setCreateError('')
@@ -78,13 +108,40 @@ export function useProjects() {
     }))
   }
 
+  const handleProjectMembersChange = (selectedValues) => {
+    if (createError) {
+      setCreateError('')
+    }
+
+    const uniqueSelectedValues = [...new Set(selectedValues)]
+
+    setFormData((current) => ({
+      ...current,
+      projectMembers: uniqueSelectedValues,
+    }))
+  }
+
   const handleCreateProject = async (event) => {
     event.preventDefault()
     setCreateError('')
     setIsCreating(true)
 
     try {
-      await createProject(formData)
+      const response = await createProject(formData)
+      const projectId = response?.data?.id
+
+      if (!projectId) {
+        throw new Error('Project was created but no project ID was returned.')
+      }
+
+      const memberIdsToAssign = formData.projectMembers.filter(
+        (userId) => String(userId) !== String(formData.projectOwner),
+      )
+
+      for (const userId of memberIdsToAssign) {
+        await assignProjectMember(projectId, userId)
+      }
+
       setIsCreateModalOpen(false)
       setFormData(INITIAL_FORM_DATA)
       await loadProjects()
@@ -101,15 +158,20 @@ export function useProjects() {
     formData,
     handleCreateProject,
     handleFormChange,
+    handleProjectMembersChange,
     isCreateModalOpen,
     isCreating,
     isLoading,
+    isUsersLoading,
     listError,
+    memberOptions,
     openCreateModal,
     ownerOptions,
     projects,
     refreshProjects: loadProjects,
+    refreshUsers: loadUsers,
     summary,
     totalCount,
+    usersError,
   }
 }

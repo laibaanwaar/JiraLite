@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 function FieldLabel({ htmlFor, children, required = false }) {
   return (
     <label htmlFor={htmlFor} className="mb-2 block text-sm font-semibold text-slate-800">
@@ -67,15 +69,141 @@ function SelectField({ id, name, value, onChange, placeholder, options, disabled
   )
 }
 
+function SearchableMultiSelect({
+  id,
+  selectedValues,
+  options,
+  onChange,
+  disabled = false,
+  isLoading = false,
+  errorMessage = '',
+  onRetry,
+}) {
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const filteredOptions = options.filter((option) => {
+    const searchableContent = `${option.label} ${option.description || ''}`.toLowerCase()
+    return searchableContent.includes(searchTerm.trim().toLowerCase())
+  })
+
+  const selectedOptions = options.filter((option) => selectedValues.includes(option.value))
+
+  const handleToggle = (value) => {
+    if (disabled) {
+      return
+    }
+
+    if (selectedValues.includes(value)) {
+      onChange(selectedValues.filter((selectedValue) => selectedValue !== value))
+      return
+    }
+
+    onChange([...selectedValues, value])
+  }
+
+  return (
+    <div>
+      <FieldLabel htmlFor={id}>Project Members</FieldLabel>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <input
+          id={id}
+          type="text"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Search users by name or email"
+          disabled={disabled || isLoading}
+          className="h-11 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#1f46b8] focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+        />
+
+        {selectedOptions.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {selectedOptions.map((option) => (
+              <button
+                key={`selected-project-member-${option.value}`}
+                type="button"
+                onClick={() => handleToggle(option.value)}
+                disabled={disabled}
+                className="inline-flex items-center gap-2 rounded-full bg-[#eef2ff] px-3 py-1.5 text-xs font-semibold text-[#1f46b8] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <span>{option.label}</span>
+                <span className="text-slate-400">{option.description}</span>
+                <span aria-hidden="true">x</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-3 max-h-60 space-y-2 overflow-y-auto">
+          {isLoading ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">Loading users...</p>
+          ) : null}
+
+          {!isLoading && errorMessage ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-600">
+              <p>{errorMessage}</p>
+              {onRetry ? (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="mt-2 inline-flex rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-700"
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!isLoading && !errorMessage && filteredOptions.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
+              {options.length === 0 ? 'No users available.' : 'No users match your search.'}
+            </p>
+          ) : null}
+
+          {!isLoading && !errorMessage
+            ? filteredOptions.map((option) => {
+                const isSelected = selectedValues.includes(option.value)
+
+                return (
+                  <label
+                    key={`project-member-option-${option.value}`}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 px-3 py-3 transition hover:border-[#1f46b8] hover:bg-[#f8faff]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => handleToggle(option.value)}
+                      disabled={disabled}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-[#1f46b8] focus:ring-[#1f46b8]"
+                    />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-semibold text-slate-800">{option.label}</span>
+                      <span className="text-xs text-slate-500">{option.description}</span>
+                    </span>
+                  </label>
+                )
+              })
+            : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CreateProjectModal({
   isOpen,
   formData,
   ownerOptions,
+  memberOptions,
   onClose,
   onChange,
+  onProjectMembersChange,
   onSubmit,
   isSubmitting,
+  isUsersLoading,
   errorMessage,
+  usersError,
+  onRetryUsers,
 }) {
   if (!isOpen) {
     return null
@@ -98,18 +226,16 @@ function CreateProjectModal({
         </div>
 
         <form onSubmit={onSubmit} className="space-y-5 px-6 pb-6 sm:px-8 sm:pb-8">
-          <div>
-            <FieldLabel htmlFor="addUser" required>
-              Add User
-            </FieldLabel>
-            <TextField
-              id="addUser"
-              name="addUser"
-              value={formData.addUser}
-              onChange={onChange}
-              placeholder="Enter user name or email"
-            />
-          </div>
+          <SearchableMultiSelect
+            id="projectMembers"
+            selectedValues={formData.projectMembers}
+            options={memberOptions}
+            onChange={onProjectMembersChange}
+            disabled={isSubmitting}
+            isLoading={isUsersLoading}
+            errorMessage={usersError}
+            onRetry={onRetryUsers}
+          />
 
           <div>
             <FieldLabel htmlFor="projectName" required>
@@ -158,9 +284,9 @@ function CreateProjectModal({
               name="projectOwner"
               value={formData.projectOwner}
               onChange={onChange}
-              placeholder="Select project owner"
+              placeholder={isUsersLoading ? 'Loading project owners...' : 'Select project owner'}
               options={ownerOptions}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUsersLoading || Boolean(usersError)}
             />
           </div>
 
@@ -204,7 +330,7 @@ function CreateProjectModal({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUsersLoading || Boolean(usersError)}
               className="inline-flex h-11 items-center justify-center rounded-lg bg-[#2a65f5] px-6 text-sm font-semibold text-white transition hover:bg-[#2057de] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isSubmitting ? 'Creating...' : 'Create Project'}

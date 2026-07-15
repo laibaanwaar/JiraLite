@@ -99,26 +99,6 @@ function normalizeProject(project) {
   }
 }
 
-function buildOwnerOptions(projects) {
-  const seen = new Set()
-
-  return projects.reduce((options, project) => {
-    const value = project.ownerId
-
-    if (!value || seen.has(value)) {
-      return options
-    }
-
-    seen.add(value)
-    options.push({
-      value,
-      label: project.ownerName,
-    })
-
-    return options
-  }, [])
-}
-
 function buildProjectSummary(projects) {
   const activeProjects = projects.filter((project) => project.status === 'ACTIVE').length
   const archivedProjects = projects.filter((project) => project.isArchived || project.status === 'ARCHIVED').length
@@ -145,8 +125,38 @@ function normalizeProjectsResponse(payload) {
     totalCount: pagination.total_count ?? projectCollection.length,
     limit: pagination.limit ?? projectCollection.length,
     offset: pagination.offset ?? 0,
-    ownerOptions: buildOwnerOptions(projectCollection),
     summary: buildProjectSummary(projectCollection),
+  }
+}
+
+function getMemberDisplayName(member) {
+  const fullName = [member?.first_name, member?.last_name]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .join(' ')
+
+  if (fullName) {
+    return fullName
+  }
+
+  if (typeof member?.email === 'string' && member.email.trim()) {
+    return member.email
+  }
+
+  return ''
+}
+
+function normalizeProjectMembersResponse(payload) {
+  const membersCollection = Array.isArray(payload?.data?.members) ? payload.data.members : []
+
+  return {
+    members: membersCollection.map((member) => ({
+      id: member?.id ?? '',
+      first_name: member?.first_name ?? '',
+      last_name: member?.last_name ?? '',
+      name: getMemberDisplayName(member),
+      email: member?.email ?? '',
+      raw: member,
+    })),
   }
 }
 
@@ -174,5 +184,25 @@ export async function createProject(formData) {
     return response.data
   } catch (error) {
     throw new Error(getProjectErrorMessage(error, 'Unable to create the project right now.'))
+  }
+}
+
+export async function assignProjectMember(projectId, userId) {
+  try {
+    const response = await api.post(`/projects/${projectId}/members/`, {
+      user_id: Number(userId),
+    })
+    return response.data
+  } catch (error) {
+    throw new Error(getProjectErrorMessage(error, 'Unable to assign a project member right now.'))
+  }
+}
+
+export async function getProjectMembers(projectId) {
+  try {
+    const response = await api.get(`/projects/${projectId}/members/`)
+    return normalizeProjectMembersResponse(response.data)
+  } catch (error) {
+    throw new Error(getProjectErrorMessage(error, 'Unable to load project members right now.'))
   }
 }

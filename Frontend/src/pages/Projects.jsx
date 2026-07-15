@@ -12,16 +12,21 @@ function Projects() {
     formData,
     handleCreateProject,
     handleFormChange,
+    handleProjectMembersChange,
     isCreateModalOpen,
     isCreating,
     isLoading,
+    isUsersLoading,
     listError,
+    memberOptions,
     openCreateModal,
     ownerOptions,
     projects,
     refreshProjects,
+    refreshUsers,
     summary,
     totalCount,
+    usersError,
   } = useProjects()
 
   return (
@@ -46,11 +51,16 @@ function Projects() {
         isOpen={isCreateModalOpen}
         formData={formData}
         ownerOptions={ownerOptions}
+        memberOptions={memberOptions}
         onClose={closeCreateModal}
         onChange={handleFormChange}
+        onProjectMembersChange={handleProjectMembersChange}
         onSubmit={handleCreateProject}
         isSubmitting={isCreating}
+        isUsersLoading={isUsersLoading}
         errorMessage={createError}
+        usersError={usersError}
+        onRetryUsers={refreshUsers}
       />
     </AppShell>
   )

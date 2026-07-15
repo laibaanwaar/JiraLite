@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { getProjects } from '../services/projectService'
+import { getProjectMembers, getProjects } from '../services/projectService'
 import { createTask, getTasks } from '../services/taskService'
-import { getUsers } from '../services/userService'
 
 const INITIAL_FORM_DATA = {
   title: '',
@@ -32,13 +31,7 @@ export const TASK_STATUS_OPTIONS = [
   { value: 'done', label: 'Done' },
 ]
 
-function getProjectMemberLabel(member, usersById) {
-  const matchedUser = usersById.get(String(member.id))
-
-  if (matchedUser?.name) {
-    return matchedUser.name
-  }
-
+function getProjectMemberLabel(member) {
   return [member.first_name, member.last_name]
     .filter((value) => typeof value === 'string' && value.trim())
     .join(' ')
@@ -50,12 +43,11 @@ export function useTasks() {
   const [projectOptions, setProjectOptions] = useState([])
   const [projectFilterOptions, setProjectFilterOptions] = useState([DEFAULT_PROJECT_FILTER_OPTION])
   const [selectedProjectId, setSelectedProjectId] = useState(DEFAULT_PROJECT_FILTER_OPTION.value)
-  const [usersById, setUsersById] = useState(new Map())
-  const [projectMembersById, setProjectMembersById] = useState(new Map())
+  const [projectMembers, setProjectMembers] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
   const [isProjectsLoading, setIsProjectsLoading] = useState(true)
-  const [isUsersLoading, setIsUsersLoading] = useState(true)
+  const [isUsersLoading, setIsUsersLoading] = useState(false)
   const [listError, setListError] = useState('')
   const [createError, setCreateError] = useState('')
   const [projectFilterError, setProjectFilterError] = useState('')
@@ -92,17 +84,12 @@ export function useTasks() {
         value: String(project.id),
         label: project.name,
       }))
-      const normalizedProjectMembersById = new Map(
-        response.projects.map((project) => [String(project.id), Array.isArray(project.members) ? project.members : []]),
-      )
 
       setProjectOptions(normalizedProjectOptions)
       setProjectFilterOptions([DEFAULT_PROJECT_FILTER_OPTION, ...normalizedProjectOptions])
-      setProjectMembersById(normalizedProjectMembersById)
     } catch (error) {
       setProjectOptions([])
       setProjectFilterOptions([DEFAULT_PROJECT_FILTER_OPTION])
-      setProjectMembersById(new Map())
       setProjectFilterError(error.message)
     } finally {
       setIsProjectsLoading(false)
@@ -113,17 +100,22 @@ export function useTasks() {
     loadProjects()
   }, [loadProjects])
 
-  const loadUsers = useCallback(async () => {
+  const loadProjectMembers = useCallback(async (projectId) => {
+    if (!projectId) {
+      setProjectMembers([])
+      setAssigneeError('')
+      setIsUsersLoading(false)
+      return
+    }
+
     setIsUsersLoading(true)
     setAssigneeError('')
 
     try {
-      const response = await getUsers()
-      setUsersById(
-        new Map(response.users.map((user) => [String(user.id), user])),
-      )
+      const response = await getProjectMembers(projectId)
+      setProjectMembers(response.members)
     } catch (error) {
-      setUsersById(new Map())
+      setProjectMembers([])
       setAssigneeError(error.message)
     } finally {
       setIsUsersLoading(false)
@@ -131,8 +123,47 @@ export function useTasks() {
   }, [])
 
   useEffect(() => {
-    loadUsers()
-  }, [loadUsers])
+    let isCurrent = true
+
+    const syncProjectMembers = async () => {
+      if (!formData.project) {
+        setProjectMembers([])
+        setAssigneeError('')
+        setIsUsersLoading(false)
+        return
+      }
+
+      setIsUsersLoading(true)
+      setAssigneeError('')
+
+      try {
+        const response = await getProjectMembers(formData.project)
+
+        if (!isCurrent) {
+          return
+        }
+
+        setProjectMembers(response.members)
+      } catch (error) {
+        if (!isCurrent) {
+          return
+        }
+
+        setProjectMembers([])
+        setAssigneeError(error.message)
+      } finally {
+        if (isCurrent) {
+          setIsUsersLoading(false)
+        }
+      }
+    }
+
+    syncProjectMembers()
+
+    return () => {
+      isCurrent = false
+    }
+  }, [formData.project])
 
   const openCreateModal = () => {
     setCreateError('')
@@ -199,12 +230,11 @@ export function useTasks() {
       return []
     }
 
-    const projectMembers = projectMembersById.get(String(formData.project)) ?? []
     const seen = new Set()
 
     return projectMembers.reduce((options, member) => {
       const value = String(member.id ?? '')
-      const label = getProjectMemberLabel(member, usersById)
+      const label = getProjectMemberLabel(member) || member.name || ''
 
       if (!value || !label || seen.has(value)) {
         return options
@@ -215,7 +245,7 @@ export function useTasks() {
 
       return options
     }, [])
-  }, [formData.project, projectMembersById, usersById])
+  }, [formData.project, projectMembers])
 
   return {
     assigneeOptions,
@@ -237,7 +267,7 @@ export function useTasks() {
     projectFilterOptions,
     refreshTasks: loadTasks,
     refreshProjects: loadProjects,
-    refreshUsers: loadUsers,
+    refreshUsers: () => loadProjectMembers(formData.project),
     selectedProjectId,
     handleProjectSelection,
     tasks,
