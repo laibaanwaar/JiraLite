@@ -77,10 +77,12 @@ function CreateTaskModal({
   formData,
   projectOptions,
   assigneeOptions,
+  assigneeError,
   onClose,
   onChange,
   onSubmit,
   isSubmitting,
+  isUsersLoading,
   errorMessage,
 }) {
   if (!isOpen) {
@@ -142,10 +144,17 @@ function CreateTaskModal({
               name="assignedTo"
               value={formData.assignedTo}
               onChange={onChange}
-              disabled={isSubmitting}
-              placeholder="Select user"
+              disabled={isSubmitting || isUsersLoading || !formData.project}
+              placeholder={
+                !formData.project
+                  ? 'Select project first'
+                  : isUsersLoading
+                    ? 'Loading users...'
+                    : 'Select user'
+              }
               options={assigneeOptions}
             />
+            {assigneeError ? <p className="mt-2 text-sm font-medium text-red-600">{assigneeError}</p> : null}
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">

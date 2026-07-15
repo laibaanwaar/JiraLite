@@ -1,16 +1,47 @@
 function ToolbarPill({ children }) {
   return (
-    <button
-      type="button"
-      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-    >
+    <div className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50">
       {children}
-      <ChevronDownIcon />
-    </button>
+    </div>
   )
 }
 
-function TaskManagementToolbar({ onCreateTask }) {
+function ProjectFilterSelect({
+  options,
+  selectedProjectId,
+  onChange,
+  disabled,
+}) {
+  return (
+    <div className="relative min-w-[12.5rem]">
+      <select
+        aria-label="Project filter"
+        value={selectedProjectId}
+        onChange={onChange}
+        disabled={disabled}
+        className="min-h-11 w-full appearance-none bg-transparent pr-7 text-sm font-semibold text-slate-700 outline-none disabled:cursor-not-allowed"
+      >
+        {options.map((option) => (
+          <option key={`task-project-filter-${option.value || 'all'}`} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-slate-500">
+        <ChevronDownIcon />
+      </span>
+    </div>
+  )
+}
+
+function TaskManagementToolbar({
+  onCreateTask,
+  projectFilterOptions,
+  projectFilterError,
+  selectedProjectId,
+  onProjectSelection,
+  isProjectsLoading,
+}) {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -37,7 +68,12 @@ function TaskManagementToolbar({ onCreateTask }) {
         <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap">
           <ToolbarPill>
             <span className="text-xs uppercase tracking-[0.16em] text-slate-500">Project:</span>
-            <span>All Projects</span>
+            <ProjectFilterSelect
+              options={projectFilterOptions}
+              selectedProjectId={selectedProjectId}
+              onChange={onProjectSelection}
+              disabled={isProjectsLoading}
+            />
           </ToolbarPill>
 
           <button
@@ -48,6 +84,10 @@ function TaskManagementToolbar({ onCreateTask }) {
           </button>
         </div>
       </div>
+
+      {projectFilterError ? (
+        <p className="text-sm font-medium text-red-600">{projectFilterError}</p>
+      ) : null}
     </div>
   )
 }

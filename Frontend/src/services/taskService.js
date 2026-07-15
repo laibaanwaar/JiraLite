@@ -178,8 +178,8 @@ function normalizeTaskCollection(payload) {
 function buildCreatePayload(formData) {
   return {
     title: formData.title.trim(),
-    project: formData.project,
-    assigned_to: formData.assignedTo,
+    project_id: Number(formData.project),
+    assigned_to_id: Number(formData.assignedTo),
     priority: formData.priority,
     status: formData.status,
     due_date: formData.dueDate,

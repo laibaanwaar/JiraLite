@@ -2,12 +2,12 @@ const navigationItems = [
   { label: 'Dashboard', href: '/dashboard', icon: DashboardIcon },
   { label: 'Projects', href: '/projects', icon: ProjectsIcon },
   { label: 'Tasks', href: '/tasks', icon: TasksIcon },
-  { label: 'Users', href: '#', icon: UsersIcon },
+  { label: 'Users', href: '/users', icon: UsersIcon },
   { label: 'Roles', href: '/roles', icon: RolesIcon },
 ]
 
 function navigateTo(pathname) {
-  if (pathname === '#' || window.location.pathname === pathname) {
+  if (window.location.pathname === pathname) {
     return
   }
 

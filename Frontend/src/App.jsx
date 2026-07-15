@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Projects from './pages/Projects'
 import Roles from './pages/Roles'
 import Tasks from './pages/Tasks'
+import Users from './pages/Users'
 import { hasStoredAuthSession } from './services/authService'
 
 function getCurrentPath() {
@@ -32,6 +33,7 @@ function App() {
     (currentPath === '/dashboard' ||
       currentPath === '/projects' ||
       currentPath === '/tasks' ||
+      currentPath === '/users' ||
       currentPath === '/roles') &&
     !hasStoredAuthSession()
   ) {
@@ -53,6 +55,10 @@ function App() {
 
   if (currentPath === '/roles' && hasStoredAuthSession()) {
     return <Roles />
+  }
+
+  if (currentPath === '/users' && hasStoredAuthSession()) {
+    return <Users />
   }
 
   return <Login />

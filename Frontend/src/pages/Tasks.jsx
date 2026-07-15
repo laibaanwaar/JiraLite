@@ -7,6 +7,7 @@ import { useTasks } from '../hooks/useTasks'
 function Tasks() {
   const {
     assigneeOptions,
+    assigneeError,
     closeCreateModal,
     createError,
     formData,
@@ -15,10 +16,16 @@ function Tasks() {
     isCreateModalOpen,
     isCreating,
     isLoading,
+    isProjectsLoading,
+    isUsersLoading,
     listError,
     openCreateModal,
     projectOptions,
+    projectFilterError,
+    projectFilterOptions,
     refreshTasks,
+    selectedProjectId,
+    handleProjectSelection,
     tasks,
     totalCount,
   } = useTasks()
@@ -28,7 +35,14 @@ function Tasks() {
       <section className="px-4 py-4 sm:px-5 sm:py-5">
         <div className="min-h-[calc(100vh-8rem)] rounded-[28px] border border-slate-200 bg-[#f8faff] px-4 py-4 sm:px-6 sm:py-6">
           <div className="space-y-5">
-            <TaskManagementToolbar onCreateTask={openCreateModal} />
+            <TaskManagementToolbar
+              onCreateTask={openCreateModal}
+              projectFilterOptions={projectFilterOptions}
+              projectFilterError={projectFilterError}
+              selectedProjectId={selectedProjectId}
+              onProjectSelection={handleProjectSelection}
+              isProjectsLoading={isProjectsLoading}
+            />
             <TaskTable
               tasks={tasks}
               totalCount={totalCount}
@@ -45,10 +59,12 @@ function Tasks() {
         formData={formData}
         projectOptions={projectOptions}
         assigneeOptions={assigneeOptions}
+        assigneeError={assigneeError}
         onClose={closeCreateModal}
         onChange={handleFormChange}
         onSubmit={handleCreateTask}
         isSubmitting={isCreating}
+        isUsersLoading={isUsersLoading}
         errorMessage={createError}
       />
     </AppShell>
