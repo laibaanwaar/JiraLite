@@ -654,7 +654,8 @@ class UserDetailUpdateApiTests(APITestCase):
         response = self.client.patch(url, {}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("message", response.data)
+        self.assertEqual(response.data["message"], "Validation failed.")
+        self.assertIn("errors", response.data)
 
     def test_patch_user_detail_password_field_rejected(self):
         self._auth()
@@ -666,7 +667,8 @@ class UserDetailUpdateApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("only first_name", response.data["message"].lower())
+        self.assertEqual(response.data["message"], "Validation failed.")
+        self.assertIn("password", response.data["errors"])
 
     def test_patch_user_detail_invalid_email_rejected(self):
         self._auth()
@@ -674,6 +676,7 @@ class UserDetailUpdateApiTests(APITestCase):
         response = self.client.patch(url, {"email": "not-an-email"}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["message"], "Validation failed.")
 
     def test_patch_user_detail_duplicate_email_rejected(self):
         self._auth()
@@ -685,6 +688,7 @@ class UserDetailUpdateApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["message"], "Email already exists.")
 
     def test_patch_user_detail_role_not_found(self):
         self._auth()
@@ -692,6 +696,7 @@ class UserDetailUpdateApiTests(APITestCase):
         response = self.client.patch(url, {"role_id": 9999}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["message"], "Invalid role.")
 
     def test_patch_user_detail_inactive_role_rejected(self):
         self._auth()
@@ -703,6 +708,7 @@ class UserDetailUpdateApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["message"], "Role is inactive.")
 
     def test_admin_cannot_remove_own_admin_role(self):
         self._auth()
@@ -743,6 +749,7 @@ class UserDetailUpdateApiTests(APITestCase):
         response = self.client.patch(url, self._payload(), format="json")
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data["message"], "Unauthorized.")
 
     def test_patch_user_detail_non_admin_rejected(self):
         self._auth(self.other_user)
@@ -750,6 +757,7 @@ class UserDetailUpdateApiTests(APITestCase):
         response = self.client.patch(url, self._payload(), format="json")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["message"], "Permission denied.")
 
 
 class UserDeactivateApiTests(APITestCase):
@@ -900,6 +908,101 @@ class UserDeactivateApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.admin_user.refresh_from_db()
         self.assertTrue(self.admin_user.is_active)
+
+
+class UserActivateApiTests(APITestCase):
+    """Tests for PATCH /api/users/{id}/activate/"""
+
+    def setUp(self):
+        self.admin_role = Role.objects.create(
+            name="Admin",
+            code="admin",
+            description="Administrator role",
+            is_active=True,
+        )
+        self.engineer_role = Role.objects.create(
+            name="Engineer",
+            code="engineer",
+            description="Engineer role",
+            is_active=True,
+        )
+
+        self.admin_user = cast(Any, User.objects).create_user(
+            email="admin@example.com",
+            password="AdminPass123!",
+            first_name="Admin",
+            last_name="User",
+            role=self.admin_role,
+            is_active=True,
+        )
+        self.active_user = cast(Any, User.objects).create_user(
+            email="active@example.com",
+            password="ActivePass123!",
+            first_name="Active",
+            last_name="User",
+            role=self.engineer_role,
+            is_active=True,
+        )
+        self.inactive_user = cast(Any, User.objects).create_user(
+            email="inactive@example.com",
+            password="InactivePass123!",
+            first_name="Inactive",
+            last_name="User",
+            role=self.engineer_role,
+            is_active=False,
+        )
+
+    def _auth(self, user=None):
+        target = user or self.admin_user
+        refresh = RefreshToken.for_user(target)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
+
+    def _get_url(self, user_id):
+        return reverse("user-activate", kwargs={"user_id": user_id})
+
+    def test_activate_user_success(self):
+        self._auth()
+        url = self._get_url(self.inactive_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["message"], "User activated successfully.")
+        self.inactive_user.refresh_from_db()
+        self.assertTrue(self.inactive_user.is_active)
+
+    def test_activate_user_missing_token_rejected(self):
+        url = self._get_url(self.inactive_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_activate_user_non_admin_rejected(self):
+        self._auth(self.active_user)
+        url = self._get_url(self.inactive_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_activate_user_invalid_id_rejected(self):
+        self._auth()
+        url = self._get_url("invalid")
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_activate_user_not_found(self):
+        self._auth()
+        url = self._get_url(9999)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_activate_user_already_active(self):
+        self._auth()
+        url = self._get_url(self.active_user.id)
+        response = self.client.patch(url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 
     def test_deactivate_last_active_admin_blocked(self):
         self.second_admin.is_active = False

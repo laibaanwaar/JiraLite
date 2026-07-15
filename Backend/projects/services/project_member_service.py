@@ -61,11 +61,33 @@ class ProjectMemberService:
     @staticmethod
     def _build_assigned_member_payload(project_member: Any) -> dict:
         return {
-            "id": project_member.id,
-            "user": ProjectMemberService._build_user_payload(project_member.user),
-            "created_at": project_member.created_at,
-            "updated_at": project_member.updated_at,
+            "id": project_member.user.id,
+            "first_name": project_member.user.first_name,
+            "last_name": project_member.user.last_name,
+            "email": project_member.user.email,
         }
+
+    @staticmethod
+    def _build_project_member_list_project_payload(project: Any) -> dict:
+        return {
+            "id": project.id,
+            "name": project.name,
+        }
+
+    @staticmethod
+    def _merge_owner_into_members(*, project: Any, members: list[dict]) -> list[dict]:
+        owner_payload = {
+            "id": project.owner.id,
+            "first_name": project.owner.first_name,
+            "last_name": project.owner.last_name,
+            "email": project.owner.email,
+        }
+        member_ids = {member["id"] for member in members}
+
+        if owner_payload["id"] in member_ids:
+            return members
+
+        return [owner_payload, *members]
 
     @staticmethod
     def _validate_project_id(project_id: int) -> dict:
@@ -283,11 +305,14 @@ class ProjectMemberService:
                 "success": True,
                 "message": "Project members retrieved successfully.",
                 "data": {
-                    "project": ProjectMemberService._build_project_payload(project),
-                    "members": [
-                        ProjectMemberService._build_assigned_member_payload(project_member)
-                        for project_member in members
-                    ],
+                    "project": ProjectMemberService._build_project_member_list_project_payload(project),
+                    "members": ProjectMemberService._merge_owner_into_members(
+                        project=project,
+                        members=[
+                            ProjectMemberService._build_assigned_member_payload(project_member)
+                            for project_member in members
+                        ],
+                    ),
                 },
             }
         except (DatabaseError, OperationalError):

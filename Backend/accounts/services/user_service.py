@@ -1,9 +1,11 @@
 import logging
+from datetime import timedelta
 from typing import Any, Optional, cast
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
+from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
 from accounts.models.role import Role
@@ -72,7 +74,7 @@ class UserService:
                     return {
                         "success": False,
                         "code": "role_not_found",
-                        "message": "Role not found.",
+                        "message": "Invalid role.",
                     }
 
                 # Verify role is active.
@@ -80,7 +82,7 @@ class UserService:
                     return {
                         "success": False,
                         "code": "role_inactive",
-                        "message": "The selected role is inactive.",
+                        "message": "Selected role is inactive.",
                     }
 
                 # Check for duplicate email (case-insensitive, already lowercased by serializer).
@@ -88,7 +90,7 @@ class UserService:
                     return {
                         "success": False,
                         "code": "duplicate_email",
-                        "message": "A user with this email already exists.",
+                        "message": "Email already exists.",
                     }
 
                 # Create the user; create_user() hashes the password internally.
@@ -118,7 +120,7 @@ class UserService:
             return {
                 "success": False,
                 "code": "duplicate_email",
-                "message": "A user with this email already exists.",
+                "message": "Email already exists.",
             }
 
         except (DatabaseError, OperationalError):
@@ -128,7 +130,6 @@ class UserService:
                 "code": "server_error",
                 "message": "A server error occurred. Please try again later.",
             }
-
         except Exception:
             logger.exception("Unexpected error during user creation.")
             return {
@@ -136,6 +137,39 @@ class UserService:
                 "code": "server_error",
                 "message": "A server error occurred. Please try again later.",
             }
+
+    @staticmethod
+    def get_dashboard_stats() -> dict:
+        try:
+            active_threshold = timezone.now() - timedelta(minutes=15)
+            total_users = cast(Any, User.objects).count()
+            active_now = cast(Any, User.objects).filter(
+                last_login__gte=active_threshold,
+            ).count()
+
+            return {
+                "success": True,
+                "data": {
+                    "total_users": total_users,
+                    "active_now": active_now,
+                    "open_invites": 0,
+                },
+            }
+        except (DatabaseError, OperationalError):
+            logger.exception("Database error while retrieving dashboard stats.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+        except Exception:
+            logger.exception("Unexpected error while retrieving dashboard stats.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+
     @staticmethod
     def get_all_users(
         *,
@@ -284,14 +318,14 @@ class UserService:
                         return {
                             "success": False,
                             "code": "role_not_found",
-                            "message": "Role not found.",
+                            "message": "Invalid role.",
                         }
 
                     if not role.is_active:
                         return {
                             "success": False,
                             "code": "role_inactive",
-                            "message": "The selected role is inactive.",
+                            "message": "Role is inactive.",
                         }
 
                     if (
@@ -311,7 +345,7 @@ class UserService:
                         return {
                             "success": False,
                             "code": "duplicate_email",
-                            "message": "A user with this email already exists.",
+                            "message": "Email already exists.",
                         }
                     user.email = email
 
@@ -351,7 +385,7 @@ class UserService:
             return {
                 "success": False,
                 "code": "duplicate_email",
-                "message": "A user with this email already exists.",
+                "message": "Email already exists.",
             }
 
         except (DatabaseError, OperationalError):
@@ -464,6 +498,76 @@ class UserService:
 
         except Exception:
             logger.exception("Unexpected error during user deactivation.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+
+    @staticmethod
+    def activate_user(*, user_id: int) -> dict:
+        """Activate an inactive user account."""
+        try:
+            with cast(Any, transaction).atomic():
+                user = cast(Any, User.objects).select_related("role").select_for_update().get(pk=user_id)
+
+                if user.is_active:
+                    return {
+                        "success": False,
+                        "code": "user_already_active",
+                        "message": "User is already active.",
+                    }
+
+                user.is_active = True
+                user.save(update_fields=["is_active", "updated_at"])
+                user.refresh_from_db()
+
+                return {
+                    "success": True,
+                    "message": "User activated successfully.",
+                    "data": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "is_active": user.is_active,
+                        "role": {
+                            "id": user.role.id,
+                            "name": user.role.name,
+                            "code": user.role.code,
+                            "is_active": user.role.is_active,
+                        },
+                        "date_joined": user.date_joined,
+                        "created_at": user.created_at,
+                        "updated_at": user.updated_at,
+                    },
+                }
+
+        except ObjectDoesNotExist:
+            return {
+                "success": False,
+                "code": "user_not_found",
+                "message": "User not found.",
+            }
+
+        except IntegrityError:
+            logger.exception("Integrity error during user activation.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+
+        except (DatabaseError, OperationalError):
+            logger.exception("Database error during user activation.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+
+        except Exception:
+            logger.exception("Unexpected error during user activation.")
             return {
                 "success": False,
                 "code": "server_error",

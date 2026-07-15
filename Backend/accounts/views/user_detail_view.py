@@ -1,6 +1,6 @@
 import logging
 
-from rest_framework import status
+from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 class UserDetailView(APIView):
     authentication_classes = [SafeJWTAuthentication]
     permission_classes = [IsActiveAuthenticatedUser, IsAdminRole]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (exceptions.NotAuthenticated, exceptions.AuthenticationFailed)):
+            return Response({"message": "Unauthorized."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, exceptions.PermissionDenied):
+            return Response({"message": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, exceptions.ParseError):
+            return Response(
+                {"message": "Validation failed.", "errors": {"non_field_errors": ["Malformed JSON."]}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return super().handle_exception(exc)
 
     @staticmethod
     def _validation_error_message(errors):
@@ -92,8 +107,13 @@ class UserDetailView(APIView):
 
             serializer = UpdateUserSerializer(data=request.data, partial=True)
             if not serializer.is_valid():
+                if "password" in request.data:
+                    return Response(
+                        {"message": "Validation failed.", "errors": {"password": ["Password cannot be updated here."]}},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 return Response(
-                    {"message": self._validation_error_message(serializer.errors)},
+                    {"message": "Validation failed.", "errors": serializer.errors},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 

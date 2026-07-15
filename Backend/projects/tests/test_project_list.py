@@ -10,7 +10,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models.role import Role
 from projects.models.project import Project
+from projects.models.project_member import ProjectMember
 from projects.services.project_service import ProjectService
+from tasks.models.task import Task
 
 
 User = get_user_model()
@@ -82,6 +84,26 @@ class ProjectListApiTests(APITestCase):
             description="Beta description",
             owner=self.manager_user,
         )
+        ProjectMember.objects.create(project=self.project_a, user=self.engineer_user)
+        ProjectMember.objects.create(project=self.project_a, user=self.manager_user)
+        Task.objects.create(
+            title="Done task",
+            description="Completed work",
+            status=Task.STATUS_DONE,
+            project=self.project_a,
+            assigned_to=self.engineer_user,
+            created_by=self.admin_user,
+        )
+        Task.objects.create(
+            title="Todo task",
+            description="Remaining work",
+            status=Task.STATUS_TODO,
+            project=self.project_a,
+            assigned_to=self.manager_user,
+            created_by=self.admin_user,
+        )
+        self.project_b.is_archived = True
+        self.project_b.save(update_fields=["is_archived", "updated_at"])
         self.url = reverse("project-list")
 
     def _auth(self, user=None):
@@ -110,6 +132,38 @@ class ProjectListApiTests(APITestCase):
         self.assertIn("owner", project)
         self.assertIn("email", project["owner"])
         self.assertIn("role", project["owner"])
+
+    def test_list_projects_includes_computed_fields(self):
+        self._auth()
+        response = self.client.get(f"{self.url}?sort=name", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        alpha_project = response.data["data"][0]
+        beta_project = response.data["data"][1]
+
+        self.assertEqual(alpha_project["status"], "ACTIVE")
+        self.assertEqual(alpha_project["members_count"], 2)
+        self.assertEqual(alpha_project["completion_percentage"], 50.0)
+        self.assertEqual(
+            alpha_project["members"],
+            [
+                {
+                    "id": self.manager_user.id,
+                    "first_name": self.manager_user.first_name,
+                    "last_name": self.manager_user.last_name,
+                },
+                {
+                    "id": self.engineer_user.id,
+                    "first_name": self.engineer_user.first_name,
+                    "last_name": self.engineer_user.last_name,
+                },
+            ],
+        )
+
+        self.assertEqual(beta_project["status"], "ARCHIVED")
+        self.assertEqual(beta_project["members_count"], 0)
+        self.assertEqual(beta_project["members"], [])
+        self.assertEqual(beta_project["completion_percentage"], 0)
 
     def test_list_projects_search_by_name(self):
         self._auth()

@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.authentication import SafeJWTAuthentication
-from projects.serializers.project_list_serializer import ProjectListSerializer
+from projects.serializers.project_list_enhanced_serializer import ProjectListEnhancedSerializer
 from projects.services.permissions import IsAdminOrProjectManagerRole
 from projects.services.project_service import ProjectService
 
@@ -51,7 +51,7 @@ class ProjectListView(APIView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
-            serializer = ProjectListSerializer(result["data"], many=True)
+            serializer = ProjectListEnhancedSerializer(result["data"], many=True)
             return Response(
                 {
                     "message": result["message"],

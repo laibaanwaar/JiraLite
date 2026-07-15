@@ -1,6 +1,6 @@
 import logging
 
-from rest_framework import status
+from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 class UserListView(APIView):
     authentication_classes = [SafeJWTAuthentication]
     permission_classes = [IsActiveAuthenticatedUser, IsAdminRole]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (exceptions.NotAuthenticated, exceptions.AuthenticationFailed)):
+            return Response({"message": "Unauthorized."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        if isinstance(exc, exceptions.PermissionDenied):
+            return Response({"message": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        if isinstance(exc, exceptions.ParseError):
+            return Response(
+                {"message": "Validation failed.", "errors": {"non_field_errors": ["Malformed JSON."]}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return super().handle_exception(exc)
 
     def get(self, request):
         try:
@@ -80,7 +95,17 @@ class UserListView(APIView):
     def post(self, request):
         """Create a new user account."""
         serializer = CreateUserSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            if "password" in serializer.errors:
+                return Response(
+                    {"message": "Password does not meet security requirements."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return Response(
+                {"message": "Validation failed.", "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         result = UserService.create_user(
             first_name=serializer.validated_data["first_name"],

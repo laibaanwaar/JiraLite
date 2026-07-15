@@ -111,14 +111,55 @@ class ProjectMemberListApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["data"]["project"]["id"], self.project.id)
-        self.assertEqual(len(response.data["data"]["members"]), 2)
-        self.assertEqual(response.data["data"]["members"][0]["user"]["email"], self.engineer_user.email)
-        self.assertFalse(response.data["data"]["members"][1]["user"]["is_active"])
+        self.assertEqual(response.data["data"]["project"]["name"], self.project.name)
+        self.assertEqual(len(response.data["data"]["members"]), 3)
+        self.assertEqual(
+            response.data["data"]["members"][0],
+            {
+                "id": self.project_owner.id,
+                "first_name": self.project_owner.first_name,
+                "last_name": self.project_owner.last_name,
+                "email": self.project_owner.email,
+            },
+        )
+        self.assertEqual(
+            response.data["data"]["members"][1],
+            {
+                "id": self.engineer_user.id,
+                "first_name": self.engineer_user.first_name,
+                "last_name": self.engineer_user.last_name,
+                "email": self.engineer_user.email,
+            },
+        )
+        self.assertEqual(
+            response.data["data"]["members"][2],
+            {
+                "id": self.inactive_member.id,
+                "first_name": self.inactive_member.first_name,
+                "last_name": self.inactive_member.last_name,
+                "email": self.inactive_member.email,
+            },
+        )
 
     def test_list_project_members_project_manager_allowed(self):
         self._auth(self.project_manager_user)
         response = self.client.get(self.url, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_list_project_members_includes_owner_when_not_in_memberships(self):
+        self._auth()
+        response = self.client.get(self.url, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["data"]["members"][0],
+            {
+                "id": self.project_owner.id,
+                "first_name": self.project_owner.first_name,
+                "last_name": self.project_owner.last_name,
+                "email": self.project_owner.email,
+            },
+        )
 
     def test_list_project_members_missing_jwt_rejected(self):
         response = self.client.get(self.url, format="json")

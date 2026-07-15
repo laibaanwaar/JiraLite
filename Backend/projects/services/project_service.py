@@ -4,9 +4,11 @@ from typing import Any, cast
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, IntegrityError, OperationalError, transaction
-from django.db.models import Q
+from django.db.models import Count, Prefetch, Q
 
+from projects.models.project_member import ProjectMember
 from projects.models.project import Project
+from tasks.models.task import Task
 
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,29 @@ User = get_user_model()
 
 
 class ProjectService:
+    @staticmethod
+    def _build_project_member_summary(member: Any) -> dict:
+        user = member.user
+        return {
+            "id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+
+    @staticmethod
+    def _derive_project_status(project: Any, members_count: int) -> str:
+        if project.is_archived:
+            return "ARCHIVED"
+        if members_count <= 0:
+            return "ON_HOLD"
+        return "ACTIVE"
+
+    @staticmethod
+    def _calculate_completion_percentage(total_tasks: int, completed_tasks: int) -> float | int:
+        if total_tasks <= 0:
+            return 0
+        return round((completed_tasks / total_tasks) * 100, 2)
+
     @staticmethod
     def _build_project_payload(project: Any) -> dict:
         return {
@@ -57,6 +82,30 @@ class ProjectService:
         }
 
     @staticmethod
+    def _build_project_list_enhanced_payload(project: Any) -> dict:
+        payload = ProjectService._build_project_list_payload(project)
+        members = [
+            ProjectService._build_project_member_summary(member)
+            for member in getattr(project, "prefetched_members", [])
+        ]
+        members_count = getattr(project, "members_count", len(members))
+        total_tasks = getattr(project, "total_tasks", 0)
+        completed_tasks = getattr(project, "completed_tasks", 0)
+
+        payload.update(
+            {
+                "status": ProjectService._derive_project_status(project, members_count),
+                "members_count": members_count,
+                "members": members,
+                "completion_percentage": ProjectService._calculate_completion_percentage(
+                    total_tasks,
+                    completed_tasks,
+                ),
+            }
+        )
+        return payload
+
+    @staticmethod
     def create_project(*, name: str, key: str, description: str = "", owner_id: int) -> dict:
         try:
             with cast(Any, transaction).atomic():
@@ -95,6 +144,10 @@ class ProjectService:
                     key=key,
                     description=description,
                     owner=owner,
+                )
+                ProjectMember.objects.create(
+                    project=project,
+                    user=owner,
                 )
 
                 return {
@@ -207,7 +260,27 @@ class ProjectService:
                 }
 
         try:
-            queryset = cast(Any, Project.objects).select_related("owner", "owner__role").all()
+            member_queryset = (
+                cast(Any, ProjectMember.objects)
+                .select_related("user")
+                .order_by("user__first_name", "user__last_name", "user__id")
+            )
+
+            queryset = (
+                cast(Any, Project.objects)
+                .select_related("owner", "owner__role")
+                .prefetch_related(Prefetch("members", queryset=member_queryset, to_attr="prefetched_members"))
+                .annotate(
+                    members_count=Count("members", distinct=True),
+                    total_tasks=Count("tasks", distinct=True),
+                    completed_tasks=Count(
+                        "tasks",
+                        filter=Q(tasks__status=Task.STATUS_DONE),
+                        distinct=True,
+                    ),
+                )
+                .all()
+            )
 
             search_term = (search or "").strip()
             if search_term:
@@ -261,7 +334,7 @@ class ProjectService:
                 "success": True,
                 "message": "Projects retrieved successfully.",
                 "data": [
-                    ProjectService._build_project_list_payload(project)
+                    ProjectService._build_project_list_enhanced_payload(project)
                     for project in projects
                 ],
                 "pagination": {

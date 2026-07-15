@@ -28,6 +28,36 @@ class RoleService:
         }
 
     @staticmethod
+    def get_dashboard_stats() -> dict:
+        try:
+            total_roles = cast(Any, Role.objects).count()
+            active_roles = cast(Any, Role.objects).filter(is_active=True).count()
+            inactive_roles = cast(Any, Role.objects).filter(is_active=False).count()
+
+            return {
+                "success": True,
+                "data": {
+                    "total_roles": total_roles,
+                    "active_roles": active_roles,
+                    "inactive_roles": inactive_roles,
+                },
+            }
+        except (DatabaseError, OperationalError):
+            logger.exception("Database error while retrieving role dashboard stats.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+        except Exception:
+            logger.exception("Unexpected error while retrieving role dashboard stats.")
+            return {
+                "success": False,
+                "code": "server_error",
+                "message": "A server error occurred. Please try again later.",
+            }
+
+    @staticmethod
     def get_all_roles() -> dict:
         try:
             roles = (

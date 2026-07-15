@@ -10,6 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models.role import Role
 from projects.models.project import Project
+from projects.models.project_member import ProjectMember
 from projects.services.project_service import ProjectService
 
 
@@ -101,6 +102,12 @@ class CreateProjectApiTests(APITestCase):
         self.assertEqual(response.data["data"]["name"], "Alpha Project")
         self.assertEqual(response.data["data"]["key"], "ALPHA")
         self.assertEqual(response.data["data"]["owner_id"], self.engineer_user.id)
+        self.assertTrue(
+            ProjectMember.objects.filter(
+                project_id=response.data["data"]["id"],
+                user_id=self.engineer_user.id,
+            ).exists()
+        )
 
     def test_create_project_defaults_description_blank(self):
         self._auth()

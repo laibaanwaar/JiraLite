@@ -292,6 +292,17 @@ class CreateTaskApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_create_task_allows_project_owner_without_membership_row(self):
+        self._auth()
+        response = self.client.post(
+            self.url,
+            self._payload(assigned_to_id=self.admin_user.id),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["assigned_to_id"], self.admin_user.id)
+
     def test_create_task_duplicate_title_rejected(self):
         self._auth()
         self.client.post(self.url, self._payload(), format="json")

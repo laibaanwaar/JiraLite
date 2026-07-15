@@ -143,6 +143,13 @@ class TaskUpdateApiTests(APITestCase):
         response = self.client.patch(self.url, {"assigned_to_id": outsider.id}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_patch_task_allows_project_owner_without_membership_row(self):
+        self._auth()
+        response = self.client.patch(self.url, {"assigned_to_id": self.admin_user.id}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["assigned_to_id"], self.admin_user.id)
+
     def test_patch_task_inactive_project_rejected(self):
         self.project.is_archived = True
         self.project.save(update_fields=["is_archived", "updated_at"])

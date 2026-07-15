@@ -69,6 +69,16 @@ class TaskService:
         }
 
     @staticmethod
+    def _user_belongs_to_project(*, project: Any, user: Any) -> bool:
+        if project.owner_id == user.pk:
+            return True
+
+        return cast(Any, ProjectMember.objects).filter(
+            project_id=project.pk,
+            user_id=user.pk,
+        ).exists()
+
+    @staticmethod
     def _validate_task_id(task_id: int) -> dict:
         try:
             task_value = int(task_id)
@@ -279,7 +289,7 @@ class TaskService:
 
                 if not assigned_user.is_active:
                     return {"success": False, "code": "assigned_user_inactive", "message": "Inactive users cannot be assigned tasks."}
-                if not cast(Any, ProjectMember.objects).filter(project_id=project.pk, user_id=assigned_user.pk).exists():
+                if not TaskService._user_belongs_to_project(project=project, user=assigned_user):
                     return {"success": False, "code": "user_not_in_project", "message": "Assigned user does not belong to this project."}
 
                 creator = project.owner
@@ -344,7 +354,7 @@ class TaskService:
 
                     if not assigned_user.is_active:
                         return {"success": False, "code": "assigned_user_inactive", "message": "Inactive users cannot be assigned tasks."}
-                    if not cast(Any, ProjectMember.objects).filter(project_id=project.pk, user_id=assigned_user.pk).exists():
+                    if not TaskService._user_belongs_to_project(project=project, user=assigned_user):
                         return {"success": False, "code": "user_not_in_project", "message": "Assigned user does not belong to this project."}
                     task.assigned_to = assigned_user
 

@@ -1,20 +1,23 @@
 from rest_framework import serializers
 
-from projects.serializers.project_detail_serializer import ProjectDetailSerializer
-from projects.serializers.project_owner_serializer import ProjectOwnerSerializer
+class ProjectMemberProjectSerializer(serializers.Serializer):
+    """Serialize minimal project data for project member list responses."""
+
+    id = serializers.IntegerField()
+    name = serializers.CharField()
 
 
 class AssignedProjectMemberSerializer(serializers.Serializer):
-    """Serialize assigned project member data for list responses."""
+    """Serialize minimal member data for assigned-to dropdowns."""
 
     id = serializers.IntegerField()
-    user = ProjectOwnerSerializer()
-    created_at = serializers.DateTimeField()
-    updated_at = serializers.DateTimeField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    email = serializers.EmailField()
 
 
 class ProjectMembersListSerializer(serializers.Serializer):
     """Serialize project member list responses."""
 
-    project = ProjectDetailSerializer()
+    project = ProjectMemberProjectSerializer()
     members = AssignedProjectMemberSerializer(many=True)

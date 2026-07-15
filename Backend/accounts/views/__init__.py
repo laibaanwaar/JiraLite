@@ -4,9 +4,12 @@ from .me_view import MeView
 from .create_role_view import CreateRoleView
 from .deactivate_role_view import DeactivateRoleView
 from .role_detail_view import RoleDetailView
+from .role_dashboard_view import RoleDashboardView
 from .role_list_view import RoleListView
 from .refresh_view import RefreshTokenView
 from .update_role_view import UpdateRoleView
+from .user_activate_view import UserActivateView
 from .user_deactivate_view import UserDeactivateView
+from .user_dashboard_view import UserDashboardView
 from .user_list_view import UserListView
 from .user_detail_view import UserDetailView
