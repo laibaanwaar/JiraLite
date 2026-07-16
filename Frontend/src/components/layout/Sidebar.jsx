@@ -1,19 +1,24 @@
-import { clearAuthSession, logoutUser } from '../../services/authService.js'
+import { useState } from 'react'
+import { clearAuthSession, logoutUser, storeAuthNotice } from '../../services/authService.js'
 
 const navigationItems = [
+  { label: 'Dashboard', path: '/dashboard', icon: DashboardIcon },
   { label: 'Profile', path: '/profile', icon: ProfileIcon },
-  { label: 'Projects', path: '/projects/create', icon: FolderIcon },
+  { label: 'Projects', path: '/projects', icon: FolderIcon },
   { label: 'Tasks', path: '/tasks', icon: TasksIcon },
-  { label: 'Calendar', path: '/calendar', icon: CalendarIcon },
-  { label: 'Activity', path: '/activity', icon: ActivityIcon },
-  { label: 'Settings', path: '/settings', icon: SettingsIcon },
-  { label: 'Notifications', path: '/notifications', icon: BellIcon },
-  { label: 'Help & Support', path: '/support', icon: HelpIcon },
+  { label: 'Task Comment', path: '/task-comment', icon: TaskCommentIcon },
 ]
 
-function navigate(event, href, onNavigate) {
-  event.preventDefault()
-  window.history.pushState({}, '', href)
+function navigate(event, href, onNavigate, options = {}) {
+  event?.preventDefault()
+  const historyState = options.state || {}
+
+  if (options.replace) {
+    window.history.replaceState(historyState, '', href)
+  } else {
+    window.history.pushState(historyState, '', href)
+  }
+
   window.dispatchEvent(new PopStateEvent('popstate'))
   onNavigate?.()
 }
@@ -34,6 +39,21 @@ function ProfileIcon() {
     <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
       <path
         d="M12 12a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Zm-6 7a6 6 0 0 1 12 0"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  )
+}
+
+function DashboardIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M4.75 5.75h6.5v5.5h-6.5v-5.5Zm8 0h6.5v8h-6.5v-8Zm-8 7h6.5v6.5h-6.5v-6.5Zm8 2.5h6.5v4h-6.5v-4Z"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -74,71 +94,11 @@ function TasksIcon() {
   )
 }
 
-function CalendarIcon() {
+function TaskCommentIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
       <path
-        d="M7.5 4.5v3M16.5 4.5v3M5 9h14M5.5 6.5h13v12h-13v-12Z"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
-function ActivityIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M5 12h3l2-5 4 10 2-5h3"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
-function SettingsIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M12 15.25a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Zm0-11v2m0 11.5v2M5.9 5.9l1.4 1.4m9.4 9.4 1.4 1.4m0-12.2-1.4 1.4m-9.4 9.4-1.4 1.4M4.25 12h2m11.5 0h2"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M17.5 10.5a5.5 5.5 0 0 0-11 0v3.75L5 17h14l-1.5-2.75V10.5ZM10 19h4"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
-function HelpIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M12 18h.01M9.75 9.5a2.25 2.25 0 1 1 3.7 1.73c-.9.72-1.45 1.2-1.45 2.27M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"
+        d="M6.25 7.25h11.5M6.25 11.25h7.5M7 18.25l-2.25 2v-14a1 1 0 0 1 1-1h12.5a1 1 0 0 1 1 1v10.5a1 1 0 0 1-1 1H7Z"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -165,15 +125,55 @@ function LogoutIcon() {
 }
 
 export default function Sidebar({ activePath = '/profile', onNavigate }) {
-  const handleLogout = (event) => {
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
+  const handleLogout = async (event) => {
     event.preventDefault()
-    logoutUser()
-      .catch(() => {
-        clearAuthSession()
+
+    if (isLoggingOut) {
+      return
+    }
+
+    setIsLoggingOut(true)
+
+    try {
+      const result = await logoutUser()
+
+      clearAuthSession()
+      storeAuthNotice({
+        message: result.message,
+        type: result.variant,
       })
-      .finally(() => {
-        navigate(event, '/login', onNavigate)
+
+      navigate(event, '/login', onNavigate, {
+        replace: true,
+        state: {
+          authNotice: {
+            message: result.message,
+            type: result.variant,
+          },
+        },
       })
+    } catch {
+      clearAuthSession()
+      storeAuthNotice({
+        message: 'You have been signed out on this device, but the server could not confirm logout.',
+        type: 'warning',
+      })
+
+      navigate(event, '/login', onNavigate, {
+        replace: true,
+        state: {
+          authNotice: {
+            message:
+              'You have been signed out on this device, but the server could not confirm logout.',
+            type: 'warning',
+          },
+        },
+      })
+    } finally {
+      setIsLoggingOut(false)
+    }
   }
 
   return (
@@ -189,9 +189,9 @@ export default function Sidebar({ activePath = '/profile', onNavigate }) {
       <nav className="flex flex-1 flex-col gap-1" aria-label="Main navigation">
         {navigationItems.map((item) => {
           const Icon = item.icon
-          const isActive = activePath === item.path
+          const isActive = activePath === item.path || (item.path === '/projects' && activePath === '/projects/create')
           const isNavigable =
-            item.path === '/profile' || item.path === '/projects/create' || item.path === '/tasks'
+            item.path === '/dashboard' || item.path === '/profile' || item.path === '/projects' || item.path === '/tasks' || item.path === '/task-comment'
           const itemClassName = `flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
             isActive
               ? 'bg-[#eef0ff] text-[#4030e8]'
@@ -214,14 +214,17 @@ export default function Sidebar({ activePath = '/profile', onNavigate }) {
       </nav>
 
       <div className="mt-8 border-t border-slate-200 pt-4">
-        <a
-          href="/login"
+        <button
+          type="button"
           onClick={handleLogout}
-          className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+          disabled={isLoggingOut}
+          aria-label="Log out"
+          aria-busy={isLoggingOut}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4] active:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-slate-600"
         >
           <LogoutIcon />
-          Logout
-        </a>
+          {isLoggingOut ? 'Logging out...' : 'Logout'}
+        </button>
       </div>
     </aside>
   )

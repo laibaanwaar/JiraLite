@@ -51,10 +51,62 @@ function getInitialEmail() {
   return window.history.state?.email || sessionStorage.getItem('signupEmail') || ''
 }
 
+function navigateTo(path, state = {}) {
+  window.history.pushState(state, '', path)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+function getSafeErrorMessage(responseData, fallbackMessage) {
+  if (typeof responseData === 'string') {
+    return responseData
+  }
+
+  if (!responseData || typeof responseData !== 'object') {
+    return fallbackMessage
+  }
+
+  if (typeof responseData.message === 'string' && responseData.message.trim()) {
+    return responseData.message
+  }
+
+  if (typeof responseData.detail === 'string' && responseData.detail.trim()) {
+    return responseData.detail
+  }
+
+  const prioritizedMessages = [
+    responseData.code?.[0],
+    responseData.email?.[0],
+    responseData.errors?.code?.[0],
+    responseData.errors?.email?.[0],
+  ]
+
+  const prioritizedMessage = prioritizedMessages.find((value) => typeof value === 'string' && value.trim())
+
+  if (prioritizedMessage) {
+    return prioritizedMessage
+  }
+
+  if (responseData.errors && typeof responseData.errors === 'object') {
+    const firstError = Object.values(responseData.errors)
+      .flat()
+      .find((value) => typeof value === 'string' && value.trim())
+
+    if (firstError) {
+      return firstError
+    }
+  }
+
+  const firstTopLevelString = Object.values(responseData).find(
+    (value) => typeof value === 'string' && value.trim(),
+  )
+
+  return firstTopLevelString || fallbackMessage
+}
+
 export default function VerifyEmailForm() {
   const [formValues, setFormValues] = useState({
     email: getInitialEmail(),
-    token: '',
+    code: '',
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isResending, setIsResending] = useState(false)
@@ -71,43 +123,55 @@ export default function VerifyEmailForm() {
   }
 
   const navigateToLogin = () => {
-    window.history.pushState({}, '', '/login')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo('/login')
   }
 
   const handleSubmit = (event) => {
     event.preventDefault()
+
+    if (isSubmitting) {
+      return
+    }
+
     setSubmitError('')
     setSubmitSuccess('')
 
+    const trimmedEmail = formValues.email.trim()
+    const trimmedCode = formValues.code.trim()
+
+    if (!trimmedEmail) {
+      setSubmitError('Email address is required.')
+      return
+    }
+
+    if (!trimmedCode) {
+      setSubmitError('Verification code is required.')
+      return
+    }
+
     const verificationPayload = {
-      token: formValues.token.trim(),
+      email: trimmedEmail,
+      code: trimmedCode,
     }
 
     setIsSubmitting(true)
 
     verifyEmail(verificationPayload)
-      .then(() => {
+      .then((responseData) => {
         sessionStorage.removeItem('signupEmail')
-        setSubmitSuccess('Email verified successfully. Redirecting to login...')
-        window.setTimeout(navigateToLogin, 700)
+        navigateTo('/login', {
+          message: getSafeErrorMessage(responseData, 'Email verified successfully. Please log in.'),
+        })
       })
       .catch((error) => {
         const fallbackMessage = 'Email verification failed. Please check the code and try again.'
         const responseData = error?.response?.data
 
-        if (typeof responseData === 'string') {
-          setSubmitError(responseData)
-          return
+        if (import.meta.env.DEV) {
+          console.error('verify-email error response:', responseData)
         }
 
-        if (responseData && typeof responseData === 'object') {
-          const firstError = Object.values(responseData).flat().find(Boolean)
-          setSubmitError(firstError || fallbackMessage)
-          return
-        }
-
-        setSubmitError(fallbackMessage)
+        setSubmitError(getSafeErrorMessage(responseData, fallbackMessage))
       })
       .finally(() => {
         setIsSubmitting(false)
@@ -131,17 +195,16 @@ export default function VerifyEmailForm() {
       .catch((error) => {
         const fallbackMessage = 'Unable to resend verification email right now.'
         const responseData = error?.response?.data
-
-        if (responseData?.message) {
-          setSubmitError(responseData.message)
-          return
-        }
-
-        setSubmitError(fallbackMessage)
+        setSubmitError(getSafeErrorMessage(responseData, fallbackMessage))
       })
       .finally(() => {
         setIsResending(false)
       })
+  }
+
+  const handleResendPageNavigation = (event) => {
+    event.preventDefault()
+    navigateTo('/resend-verification', { email: formValues.email.trim() || formValues.email })
   }
 
   return (
@@ -159,10 +222,10 @@ export default function VerifyEmailForm() {
       />
 
       <FormInput
-        id="verificationToken"
-        name="token"
-        label="Verification Code / Token"
-        value={formValues.token}
+        id="verificationCode"
+        name="code"
+        label="Verification Code"
+        value={formValues.code}
         onChange={handleChange}
         placeholder="Paste or enter your verification code"
         autoComplete="one-time-code"
@@ -190,7 +253,7 @@ export default function VerifyEmailForm() {
       <button
         type="submit"
         className="min-h-[58px] rounded-xl border-0 bg-linear-to-r from-[#2659ff] via-[#3467ff] to-[#2554f6] text-[1.05rem] font-bold text-white shadow-[0_16px_26px_rgba(47,87,255,0.28)] transition duration-150 hover:enabled:-translate-y-px hover:enabled:shadow-[0_20px_30px_rgba(47,87,255,0.32)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(61,104,255,0.28)] active:enabled:translate-y-0 active:enabled:shadow-[0_12px_22px_rgba(47,87,255,0.24)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
-        disabled={isSubmitting || !formValues.token.trim()}
+        disabled={isSubmitting || !formValues.email.trim() || !formValues.code.trim()}
       >
         {isSubmitting ? 'Verifying...' : 'Verify Email'}
       </button>
@@ -205,6 +268,17 @@ export default function VerifyEmailForm() {
         >
           {isResending ? 'Sending...' : 'Resend verification'}
         </button>
+      </p>
+
+      <p className="m-0 text-center text-[0.95rem] text-slate-500">
+        Need the full resend page?{' '}
+        <a
+          href="/resend-verification"
+          onClick={handleResendPageNavigation}
+          className="font-semibold text-blue-600 no-underline hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-blue-500"
+        >
+          Open resend form
+        </a>
       </p>
 
       <div className="h-px bg-[linear-gradient(90deg,rgba(211,221,242,0.18)_0%,rgba(211,221,242,1)_50%,rgba(211,221,242,0.18)_100%)]" />

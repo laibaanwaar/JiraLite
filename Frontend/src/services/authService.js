@@ -1,9 +1,11 @@
 import axios from 'axios'
+import { API_BASE } from './apiConfig.js'
 
-const API_BASE = 'http://127.0.0.1:8000'
 const ACCESS_TOKEN_KEY = 'authToken'
 const REFRESH_TOKEN_KEY = 'refreshToken'
 const USER_KEY = 'authUser'
+const AUTH_NOTICE_KEY = 'authNotice'
+const POST_LOGIN_REDIRECT_KEY = 'postLoginRedirectPath'
 
 function getStorage(rememberMe = false) {
   return rememberMe ? localStorage : sessionStorage
@@ -68,9 +70,127 @@ export function clearAuthSession() {
   sessionStorage.removeItem(ACCESS_TOKEN_KEY)
   sessionStorage.removeItem(REFRESH_TOKEN_KEY)
   sessionStorage.removeItem(USER_KEY)
+  sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
   localStorage.removeItem(ACCESS_TOKEN_KEY)
   localStorage.removeItem(REFRESH_TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
+  localStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
+}
+
+export function updateStoredUser(user) {
+  if (!user) {
+    sessionStorage.removeItem(USER_KEY)
+    localStorage.removeItem(USER_KEY)
+    return
+  }
+
+  const serializedUser = JSON.stringify(user)
+
+  if (sessionStorage.getItem(ACCESS_TOKEN_KEY)) {
+    sessionStorage.setItem(USER_KEY, serializedUser)
+  }
+
+  if (localStorage.getItem(ACCESS_TOKEN_KEY)) {
+    localStorage.setItem(USER_KEY, serializedUser)
+  }
+}
+
+export function storeAuthNotice(notice) {
+  if (!notice?.message) {
+    sessionStorage.removeItem(AUTH_NOTICE_KEY)
+    return
+  }
+
+  sessionStorage.setItem(AUTH_NOTICE_KEY, JSON.stringify(notice))
+}
+
+export function consumeAuthNotice() {
+  const storedNotice = sessionStorage.getItem(AUTH_NOTICE_KEY)
+
+  if (!storedNotice) {
+    return null
+  }
+
+  sessionStorage.removeItem(AUTH_NOTICE_KEY)
+
+  try {
+    return JSON.parse(storedNotice)
+  } catch {
+    return null
+  }
+}
+
+function isIdempotentLogoutResponse(data) {
+  const message = String(data?.message || '').toLowerCase()
+  return message.includes('already logged out') || message.includes('blacklisted') || message.includes('expired')
+}
+
+function normalizeLogoutError(error) {
+  const status = error?.response?.status
+  const message = String(error?.response?.data?.message || '').toLowerCase()
+
+  if (status === 400 && (message.includes('blacklisted') || message.includes('expired'))) {
+    return {
+      ok: true,
+      message: 'Logged out successfully.',
+      variant: 'success',
+    }
+  }
+
+  if (status === 400) {
+    return {
+      ok: false,
+      message: 'Your session is no longer valid. You have been signed out.',
+      variant: 'warning',
+    }
+  }
+
+  if (status === 401) {
+    return {
+      ok: false,
+      message: 'Your session has expired. Please log in again.',
+      variant: 'warning',
+    }
+  }
+
+  if (status === 403) {
+    return {
+      ok: false,
+      message: 'Your account can no longer access this application.',
+      variant: 'warning',
+    }
+  }
+
+  if (status === 429) {
+    return {
+      ok: false,
+      message: 'Too many logout requests. You have been signed out locally.',
+      variant: 'warning',
+    }
+  }
+
+  if (status === 500) {
+    return {
+      ok: false,
+      message: 'You have been signed out on this device, but the server could not confirm logout.',
+      variant: 'warning',
+    }
+  }
+
+  if (error?.code === 'ECONNABORTED' || error?.request) {
+    return {
+      ok: false,
+      message:
+        'You have been signed out on this device. The server could not be reached to invalidate the session.',
+      variant: 'warning',
+    }
+  }
+
+  return {
+    ok: false,
+    message: 'You have been signed out on this device, but the server could not confirm logout.',
+    variant: 'warning',
+  }
 }
 
 export async function signupUser(payload) {
@@ -79,9 +199,18 @@ export async function signupUser(payload) {
 }
 
 export async function verifyEmail(payload) {
-  const response = await axios.post(`${API_BASE}/api/auth/verify-email/`, {
-    token: payload.token,
-  })
+  const response = await axios.post(
+    `${API_BASE}/api/auth/verify-email/`,
+    {
+      email: String(payload.email ?? '').trim(),
+      code: String(payload.code ?? '').trim(),
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+  )
   return response.data
 }
 
@@ -96,33 +225,45 @@ export async function loginUser(payload) {
 }
 
 export async function logoutUser(refreshToken = getRefreshToken(), accessToken = getAccessToken()) {
-  const response = await axios.post(
-    `${API_BASE}/api/auth/logout/`,
-    { refresh: refreshToken },
-    {
-      headers: authHeaders(accessToken),
-    },
-  )
-  clearAuthSession()
-  return response.data
-}
+  if (!accessToken) {
+    return {
+      ok: true,
+      message: 'Logged out successfully.',
+      variant: 'success',
+    }
+  }
 
-export async function getProfile(accessToken = getAccessToken()) {
-  const response = await axios.get(`${API_BASE}/api/profile/`, {
-    headers: authHeaders(accessToken),
-  })
-  return response.data
-}
+  if (!refreshToken) {
+    return {
+      ok: true,
+      message: 'Your session was incomplete. You have been signed out locally.',
+      variant: 'warning',
+    }
+  }
 
-export async function updateProfile(payload, accessToken = getAccessToken()) {
-  const isMultipart = payload instanceof FormData
-  const response = await axios.patch(`${API_BASE}/api/profile/`, payload, {
-    headers: {
-      ...authHeaders(accessToken),
-      ...(isMultipart ? {} : { 'Content-Type': 'application/json' }),
-    },
-  })
-  return response.data
+  try {
+    const response = await axios.post(
+      `${API_BASE}/api/auth/logout/`,
+      { refresh: refreshToken },
+      {
+        headers: {
+          ...authHeaders(accessToken),
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      },
+    )
+
+    return {
+      ok: true,
+      message: isIdempotentLogoutResponse(response.data)
+        ? 'Logged out successfully.'
+        : response.data?.message || 'Logged out successfully.',
+      variant: 'success',
+    }
+  } catch (error) {
+    return normalizeLogoutError(error)
+  }
 }
 
 export async function deleteAvatar(accessToken = getAccessToken()) {

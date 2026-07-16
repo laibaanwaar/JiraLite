@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import FormInput from './FormInput.jsx'
 import PasswordInput from './PasswordInput.jsx'
-import { getProfile, loginUser, storeAuthSession } from '../../services/authService.js'
+import { consumeAuthNotice, loginUser, storeAuthSession } from '../../services/authService.js'
+import { clearPostLoginRedirectPath, getPostLoginRedirectPath } from '../../hooks/useProfile.js'
+import { getProfile } from '../../services/profileService.js'
 
 function MailIcon() {
   return (
@@ -34,6 +36,11 @@ function LockIcon() {
 }
 
 export default function LoginForm() {
+  const rawNotice = window.history.state?.authNotice || window.history.state?.message || consumeAuthNotice()
+  const initialNotice =
+    typeof rawNotice === 'string'
+      ? { message: rawNotice, type: 'success' }
+      : rawNotice
   const [formValues, setFormValues] = useState({
     email: '',
     password: '',
@@ -42,7 +49,8 @@ export default function LoginForm() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const [submitSuccess, setSubmitSuccess] = useState('')
+  const [submitSuccess, setSubmitSuccess] = useState(initialNotice?.type === 'warning' ? '' : initialNotice?.message || '')
+  const [submitWarning, setSubmitWarning] = useState(initialNotice?.type === 'warning' ? initialNotice?.message || '' : '')
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -60,7 +68,9 @@ export default function LoginForm() {
   }
 
   const navigateToProfile = () => {
-    window.history.pushState({}, '', '/profile')
+    const redirectPath = getPostLoginRedirectPath() || '/profile'
+    clearPostLoginRedirectPath()
+    window.history.pushState({}, '', redirectPath)
     window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
@@ -68,6 +78,7 @@ export default function LoginForm() {
     event.preventDefault()
     setSubmitError('')
     setSubmitSuccess('')
+    setSubmitWarning('')
 
     const loginPayload = {
       email: formValues.email.trim(),
@@ -94,16 +105,16 @@ export default function LoginForm() {
           rememberMe,
         })
 
-        return getProfile(accessToken).then((profileResponse) => ({
-          profileResponse,
+        return getProfile(accessToken).then((profile) => ({
+          profile,
           session,
         }))
       })
-      .then(({ profileResponse, session }) => {
+      .then(({ profile, session }) => {
         storeAuthSession({
           accessToken: session.accessToken,
           refreshToken: session.refreshToken,
-          user: profileResponse.data,
+          user: profile,
           rememberMe: session.rememberMe,
         })
         setSubmitSuccess('Login successful.')
@@ -194,6 +205,15 @@ export default function LoginForm() {
           role="status"
         >
           {submitSuccess}
+        </p>
+      ) : null}
+
+      {submitWarning ? (
+        <p
+          className="mt-[-4px] rounded-xl border border-amber-300/50 bg-amber-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-amber-800"
+          role="status"
+        >
+          {submitWarning}
         </p>
       ) : null}
 
