@@ -1,67 +1,56 @@
 import { useEffect, useState } from 'react'
+import LoginPage from './pages/LoginPage.jsx'
+import ProfilePage from './pages/ProfilePage.jsx'
+import CreateProjectPage from './pages/projects/CreateProjectPage.jsx'
+import SignupPage from './pages/SignupPage.jsx'
+import TasksPage from './pages/tasks/TasksPage.jsx'
+import VerifyEmailPage from './pages/VerifyEmailPage.jsx'
+import { getAccessToken } from './services/authService.js'
 
-import Dashboard from './pages/Dashboard'
-import Login from './pages/Login'
-import Projects from './pages/Projects'
-import Roles from './pages/Roles'
-import Tasks from './pages/Tasks'
-import Users from './pages/Users'
-import { hasStoredAuthSession } from './services/authService'
-
-function getCurrentPath() {
-  return window.location.pathname
-}
-
-function App() {
-  const [currentPath, setCurrentPath] = useState(getCurrentPath)
+function usePathname() {
+  const [pathname, setPathname] = useState(window.location.pathname)
 
   useEffect(() => {
-    const handleLocationChange = () => {
-      setCurrentPath(getCurrentPath())
+    const handlePopState = () => {
+      setPathname(window.location.pathname)
     }
 
-    window.addEventListener('popstate', handleLocationChange)
-    window.addEventListener('app:navigate', handleLocationChange)
+    window.addEventListener('popstate', handlePopState)
 
     return () => {
-      window.removeEventListener('popstate', handleLocationChange)
-      window.removeEventListener('app:navigate', handleLocationChange)
+      window.removeEventListener('popstate', handlePopState)
     }
   }, [])
 
-  if (
-    (currentPath === '/dashboard' ||
-      currentPath === '/projects' ||
-      currentPath === '/tasks' ||
-      currentPath === '/users' ||
-      currentPath === '/roles') &&
-    !hasStoredAuthSession()
-  ) {
-    window.history.replaceState({}, '', '/')
-    return <Login />
-  }
-
-  if (currentPath === '/dashboard' && hasStoredAuthSession()) {
-    return <Dashboard />
-  }
-
-  if (currentPath === '/projects' && hasStoredAuthSession()) {
-    return <Projects />
-  }
-
-  if (currentPath === '/tasks' && hasStoredAuthSession()) {
-    return <Tasks />
-  }
-
-  if (currentPath === '/roles' && hasStoredAuthSession()) {
-    return <Roles />
-  }
-
-  if (currentPath === '/users' && hasStoredAuthSession()) {
-    return <Users />
-  }
-
-  return <Login />
+  return pathname
 }
 
-export default App
+export default function App() {
+  const pathname = usePathname()
+
+  if (pathname === '/login') {
+    return <LoginPage />
+  }
+
+  if (pathname === '/verify-email') {
+    return <VerifyEmailPage />
+  }
+
+  if (pathname === '/profile') {
+    return <ProfilePage />
+  }
+
+  if (pathname === '/projects/create') {
+    return <CreateProjectPage />
+  }
+
+  if (pathname === '/tasks') {
+    return <TasksPage />
+  }
+
+  if (getAccessToken()) {
+    return <ProfilePage />
+  }
+
+  return <SignupPage />
+}
