@@ -1,5 +1,2 @@
-from django.urls import include, path
+urlpatterns = []
 
-urlpatterns = [
-    path("", include("tasks.routes.task_routes")),
-]

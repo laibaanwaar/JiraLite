@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -109,6 +110,11 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {'min_length': 12},
+    },
+    {
+        'NAME': 'accounts.password_validation.MaximumLengthPasswordValidator',
+        'OPTIONS': {'max_length': 64},
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -133,6 +139,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -142,11 +150,64 @@ CORS_ALLOW_ALL_ORIGINS = True
 # Django REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "accounts.authentication.VerifiedJWTAuthentication",
     ),
 }
 
 SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(hours=24),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
 }
+
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+FRONTEND_VERIFY_EMAIL_URL = config("FRONTEND_VERIFY_EMAIL_URL", default="")
+EMAIL_VERIFICATION_EXPIRY_HOURS = config("EMAIL_VERIFICATION_EXPIRY_HOURS", default=24, cast=int)
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="no-reply@jiralite.local")
+EMAIL_BACKEND = config(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.locmem.EmailBackend",
+)
+EMAIL_HOST = config("EMAIL_HOST", default="localhost")
+EMAIL_PORT = config("EMAIL_PORT", default=25, cast=int)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=False, cast=bool)
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", default=False, cast=bool)
+EMAIL_TIMEOUT = config("EMAIL_TIMEOUT", default=None, cast=int)
+RESEND_VERIFICATION_COOLDOWN_SECONDS = config(
+    "RESEND_VERIFICATION_COOLDOWN_SECONDS",
+    default=60,
+    cast=int,
+)
+RESEND_VERIFICATION_EMAIL_LIMIT_PER_HOUR = config(
+    "RESEND_VERIFICATION_EMAIL_LIMIT_PER_HOUR",
+    default=5,
+    cast=int,
+)
+RESEND_VERIFICATION_IP_LIMIT_PER_HOUR = config(
+    "RESEND_VERIFICATION_IP_LIMIT_PER_HOUR",
+    default=20,
+    cast=int,
+)
+SIGNUP_EMAIL_LIMIT_PER_HOUR = config(
+    "SIGNUP_EMAIL_LIMIT_PER_HOUR",
+    default=10,
+    cast=int,
+)
+SIGNUP_IP_LIMIT_PER_HOUR = config(
+    "SIGNUP_IP_LIMIT_PER_HOUR",
+    default=25,
+    cast=int,
+)
+LOGIN_EMAIL_LIMIT_PER_MINUTE = config(
+    "LOGIN_EMAIL_LIMIT_PER_MINUTE",
+    default=10,
+    cast=int,
+)
+LOGIN_IP_LIMIT_PER_MINUTE = config(
+    "LOGIN_IP_LIMIT_PER_MINUTE",
+    default=20,
+    cast=int,
+)

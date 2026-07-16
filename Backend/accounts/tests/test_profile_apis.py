@@ -1,0 +1,145 @@
+import base64
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from accounts.models import UserProfile
+
+
+User = get_user_model()
+
+PNG_IMAGE_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n1wAAAAASUVORK5CYII="
+)
+
+
+class ProfileApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            first_name="Sara",
+            last_name="Ahmed",
+            email="profile@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
+        self.profile_url = reverse("profile-detail")
+        self.avatar_delete_url = reverse("profile-avatar-delete")
+
+    def test_get_profile_creates_missing_profile(self):
+        response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
+
+    def test_get_profile_requires_authentication(self):
+        self.client.credentials()
+        response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_patch_profile_partial_update_json(self):
+        response = self.client.patch(
+            self.profile_url,
+            {
+                "first_name": "  Sarah ",
+                "phone": " +92 300-1234567 ",
+                "bio": "  Product builder. ",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Sarah")
+        self.assertEqual(self.user.profile.phone, "+92 300-1234567")
+        self.assertEqual(self.user.profile.bio, "Product builder.")
+
+    def test_patch_profile_rejects_blank_name(self):
+        response = self.client.patch(self.profile_url, {"first_name": "   "}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_profile_rejects_invalid_phone(self):
+        response = self.client.patch(self.profile_url, {"phone": "abc123"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_profile_rejects_long_bio(self):
+        response = self.client.patch(self.profile_url, {"bio": "a" * 501}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_profile_updates_image(self):
+        response = self.client.patch(
+            self.profile_url,
+            {
+                "profile_image": SimpleUploadedFile(
+                    "avatar.png",
+                    PNG_IMAGE_BYTES,
+                    content_type="image/png",
+                )
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(bool(self.user.profile.profile_image))
+
+    def test_patch_profile_rejects_invalid_image_type(self):
+        response = self.client.patch(
+            self.profile_url,
+            {
+                "profile_image": SimpleUploadedFile(
+                    "avatar.gif",
+                    b"gif-content",
+                    content_type="image/gif",
+                )
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_profile_rejects_damaged_image(self):
+        response = self.client.patch(
+            self.profile_url,
+            {
+                "profile_image": SimpleUploadedFile(
+                    "avatar.png",
+                    b"not-a-real-image",
+                    content_type="image/png",
+                )
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete_avatar_success(self):
+        self.client.patch(
+            self.profile_url,
+            {
+                "profile_image": SimpleUploadedFile(
+                    "avatar.png",
+                    PNG_IMAGE_BYTES,
+                    content_type="image/png",
+                )
+            },
+            format="multipart",
+        )
+        response = self.client.delete(self.avatar_delete_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertFalse(bool(self.user.profile.profile_image))
+
+    def test_profile_update_handles_unexpected_error(self):
+        with patch(
+            "accounts.services.profile_service.ProfileService.update_profile",
+            side_effect=Exception("unexpected"),
+        ):
+            response = self.client.patch(
+                self.profile_url,
+                {"bio": "Hello"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
