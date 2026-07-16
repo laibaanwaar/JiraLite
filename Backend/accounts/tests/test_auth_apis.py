@@ -26,18 +26,17 @@ class AuthApiTests(APITestCase):
         self.logout_url = reverse("auth-logout")
 
     def test_signup_success(self):
-        with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post(
-                self.signup_url,
-                {
-                    "first_name": "Jane",
-                    "last_name": "Doe",
-                    "email": "  Jane.Doe@Example.com ",
-                    "password": "VeryStrongPass123!",
-                    "confirm_password": "VeryStrongPass123!",
-                },
-                format="json",
-            )
+        response = self.client.post(
+            self.signup_url,
+            {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "email": "  Jane.Doe@Example.com ",
+                "password": "VeryStrongPass123!",
+                "confirm_password": "VeryStrongPass123!",
+            },
+            format="json",
+        )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         user = User.objects.get(email="jane.doe@example.com")
@@ -45,7 +44,8 @@ class AuthApiTests(APITestCase):
         self.assertTrue(user.check_password("VeryStrongPass123!"))
         self.assertEqual(EmailVerification.objects.filter(user=user).count(), 1)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("token=", mail.outbox[0].body)
+        self.assertIn("6-digit OTP", mail.outbox[0].body)
+        self.assertNotIn("token=", mail.outbox[0].body)
 
     def test_signup_rejects_duplicate_email_case_insensitive(self):
         User.objects.create_user(
@@ -94,28 +94,52 @@ class AuthApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password", response.data["errors"])
+        self.assertTrue(response.data["errors"]["password"])
 
     def test_signup_returns_503_for_email_failure(self):
         with patch(
-            "accounts.services.auth_service.transaction.on_commit",
-            side_effect=lambda callback: callback(),
+            "accounts.services.email_service.send_mail",
+            side_effect=TimeoutError("smtp timeout"),
         ):
-            with patch(
-                "accounts.services.email_service.send_mail",
-                side_effect=TimeoutError("smtp timeout"),
-            ):
-                response = self.client.post(
-                    self.signup_url,
-                    {
-                        "first_name": "Jane",
-                        "last_name": "Doe",
-                        "email": "jane2@example.com",
-                        "password": "VeryStrongPass123!",
-                        "confirm_password": "VeryStrongPass123!",
-                    },
-                    format="json",
-                )
+            response = self.client.post(
+                self.signup_url,
+                {
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                    "email": "jane2@example.com",
+                    "password": "VeryStrongPass123!",
+                    "confirm_password": "VeryStrongPass123!",
+                },
+                format="json",
+            )
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertFalse(User.objects.filter(email="jane2@example.com").exists())
+        self.assertEqual(EmailVerification.objects.count(), 0)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_signup_can_retry_after_email_failure(self):
+        payload = {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "email": "retry@example.com",
+            "password": "VeryStrongPass123!",
+            "confirm_password": "VeryStrongPass123!",
+        }
+
+        with patch(
+            "accounts.services.email_service.send_mail",
+            side_effect=TimeoutError("smtp timeout"),
+        ):
+            failed_response = self.client.post(self.signup_url, payload, format="json")
+
+        self.assertEqual(failed_response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertFalse(User.objects.filter(email="retry@example.com").exists())
+
+        success_response = self.client.post(self.signup_url, payload, format="json")
+
+        self.assertEqual(success_response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(User.objects.filter(email="retry@example.com").exists())
 
     def test_signup_returns_409_for_integrity_error(self):
         with patch(
@@ -142,41 +166,69 @@ class AuthApiTests(APITestCase):
             email="pending@example.com",
             password="PendingPass123!",
         )
-        token = "raw-verify-token"
+        otp = "482913"
         verification = EmailVerification.objects.create(
             user=user,
-            token_hash=VerificationEmailService.hash_token(token),
-            expires_at=timezone.now() + timedelta(hours=1),
+            otp_hash=VerificationEmailService.hash_otp(otp),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
         )
 
-        response = self.client.post(self.verify_url, {"token": token}, format="json")
+        response = self.client.post(self.verify_url, {"email": user.email, "code": otp}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         verification.refresh_from_db()
         user.refresh_from_db()
         self.assertTrue(user.is_email_verified)
         self.assertIsNotNone(verification.used_at)
+        self.assertEqual(response.data["message"], "Email verified successfully.")
+        self.assertEqual(response.data["data"]["email"], user.email)
+        self.assertTrue(response.data["data"]["is_verified"])
 
-    def test_verify_email_rejects_invalid_token(self):
-        response = self.client.post(self.verify_url, {"token": "invalid-token"}, format="json")
+    def test_verify_email_rejects_invalid_otp(self):
+        user = User.objects.create_user(
+            first_name="Pending",
+            last_name="User",
+            email="missing@example.com",
+            password="PendingPass123!",
+        )
+        EmailVerification.objects.create(
+            user=user,
+            otp_hash=VerificationEmailService.hash_otp("654321"),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
+        )
+        response = self.client.post(
+            self.verify_url,
+            {"email": "missing@example.com", "code": "123456"},
+            format="json",
+        )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["message"], "Invalid verification code.")
+        self.assertEqual(
+            response.data["errors"]["code"][0],
+            "The verification code is incorrect.",
+        )
 
-    def test_verify_email_rejects_expired_token(self):
+    def test_verify_email_rejects_expired_otp(self):
         user = User.objects.create_user(
             first_name="Pending",
             last_name="User",
             email="expired@example.com",
             password="PendingPass123!",
         )
-        token = "expired-token"
+        otp = "111222"
         EmailVerification.objects.create(
             user=user,
-            token_hash=VerificationEmailService.hash_token(token),
+            otp_hash=VerificationEmailService.hash_otp(otp),
             expires_at=timezone.now() - timedelta(minutes=1),
+            last_sent_at=timezone.now() - timedelta(minutes=11),
         )
 
-        response = self.client.post(self.verify_url, {"token": token}, format="json")
-        self.assertEqual(response.status_code, status.HTTP_410_GONE)
+        response = self.client.post(self.verify_url, {"email": user.email, "code": otp}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["message"], "Verification code has expired.")
+        self.assertEqual(response.data["errors"]["code"][0], "Request a new verification code.")
 
     def test_verify_email_handles_already_verified(self):
         user = User.objects.create_user(
@@ -186,31 +238,163 @@ class AuthApiTests(APITestCase):
             password="VerifiedPass123!",
             is_email_verified=True,
         )
-        token = "verified-token"
+        otp = "123456"
         EmailVerification.objects.create(
             user=user,
-            token_hash=VerificationEmailService.hash_token(token),
-            expires_at=timezone.now() + timedelta(hours=1),
+            otp_hash=VerificationEmailService.hash_otp(otp),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
         )
-        response = self.client.post(self.verify_url, {"token": token}, format="json")
+        response = self.client.post(self.verify_url, {"email": user.email, "code": otp}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["data"]["is_verified"])
 
-    def test_verify_email_rejects_used_token(self):
+    def test_verify_email_rejects_used_otp(self):
         user = User.objects.create_user(
             first_name="Pending",
             last_name="User",
             email="used@example.com",
             password="PendingPass123!",
         )
-        token = "used-token"
+        otp = "654321"
         EmailVerification.objects.create(
             user=user,
-            token_hash=VerificationEmailService.hash_token(token),
-            expires_at=timezone.now() + timedelta(hours=1),
+            otp_hash=VerificationEmailService.hash_otp(otp),
+            expires_at=timezone.now() + timedelta(minutes=10),
             used_at=timezone.now(),
+            last_sent_at=timezone.now(),
         )
-        response = self.client.post(self.verify_url, {"token": token}, format="json")
+        response = self.client.post(self.verify_url, {"email": user.email, "code": otp}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["message"], "Invalid verification code.")
+
+    def test_verify_email_rejects_missing_email(self):
+        response = self.client.post(
+            self.verify_url,
+            {"code": "123456"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data["errors"])
+
+    def test_verify_email_rejects_missing_code(self):
+        response = self.client.post(
+            self.verify_url,
+            {"email": "format@example.com"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("code", response.data["errors"])
+
+    def test_verify_email_rejects_invalid_email_format(self):
+        response = self.client.post(
+            self.verify_url,
+            {"email": "bad-email", "code": "123456"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data["errors"])
+
+    def test_verify_email_accepts_leading_zero_code(self):
+        user = User.objects.create_user(
+            first_name="Pending",
+            last_name="User",
+            email="leadingzero@example.com",
+            password="PendingPass123!",
+        )
+        code = "012345"
+        EmailVerification.objects.create(
+            user=user,
+            otp_hash=VerificationEmailService.hash_otp(code),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            self.verify_url,
+            {"email": user.email, "code": code},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["data"]["is_verified"])
+
+    def test_verify_email_matches_email_case_insensitively(self):
+        user = User.objects.create_user(
+            first_name="Pending",
+            last_name="User",
+            email="casecheck@example.com",
+            password="PendingPass123!",
+        )
+        code = "816751"
+        EmailVerification.objects.create(
+            user=user,
+            otp_hash=VerificationEmailService.hash_otp(code),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            self.verify_url,
+            {"email": "  CASECHECK@EXAMPLE.COM ", "code": code},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_verify_email_blocks_after_max_failed_attempts(self):
+        user = User.objects.create_user(
+            first_name="Pending",
+            last_name="User",
+            email="attempts@example.com",
+            password="PendingPass123!",
+        )
+        verification = EmailVerification.objects.create(
+            user=user,
+            otp_hash=VerificationEmailService.hash_otp("222333"),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
+        )
+
+        for _ in range(5):
+            response = self.client.post(
+                self.verify_url,
+                {"email": user.email, "code": "999999"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        verification.refresh_from_db()
+        self.assertEqual(verification.failed_attempts, 5)
+
+    def test_verify_email_rejects_old_otp_after_resend(self):
+        user = User.objects.create_user(
+            first_name="Pending",
+            last_name="User",
+            email="rotate@example.com",
+            password="PendingPass123!",
+        )
+        old_verification = EmailVerification.objects.create(
+            user=user,
+            otp_hash=VerificationEmailService.hash_otp("123456"),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                self.resend_url,
+                {"email": user.email},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        old_verification.refresh_from_db()
+        self.assertIsNotNone(old_verification.used_at)
+        verify_response = self.client.post(
+            self.verify_url,
+            {"email": user.email, "code": "123456"},
+            format="json",
+        )
+        self.assertEqual(verify_response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_resend_verification_returns_generic_message_for_missing_user(self):
         response = self.client.post(
@@ -221,7 +405,7 @@ class AuthApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             response.data["message"],
-            "If the account is eligible, a verification email has been sent.",
+            "If the account is eligible, a new OTP has been sent.",
         )
 
     def test_resend_verification_rotates_token(self):
@@ -233,8 +417,9 @@ class AuthApiTests(APITestCase):
         )
         EmailVerification.objects.create(
             user=user,
-            token_hash=VerificationEmailService.hash_token("old-token"),
-            expires_at=timezone.now() + timedelta(hours=1),
+            otp_hash=VerificationEmailService.hash_otp("123456"),
+            expires_at=timezone.now() + timedelta(minutes=10),
+            last_sent_at=timezone.now(),
         )
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -251,6 +436,7 @@ class AuthApiTests(APITestCase):
             1,
         )
         self.assertEqual(len(mail.outbox), 1)
+        self.assertNotIn("token=", mail.outbox[0].body)
 
     def test_resend_verification_rate_limit(self):
         user = User.objects.create_user(

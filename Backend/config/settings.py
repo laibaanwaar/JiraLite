@@ -161,9 +161,11 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 
-FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
-FRONTEND_VERIFY_EMAIL_URL = config("FRONTEND_VERIFY_EMAIL_URL", default="")
-EMAIL_VERIFICATION_EXPIRY_HOURS = config("EMAIL_VERIFICATION_EXPIRY_HOURS", default=24, cast=int)
+EMAIL_VERIFICATION_OTP_EXPIRY_MINUTES = config(
+    "EMAIL_VERIFICATION_OTP_EXPIRY_MINUTES",
+    default=10,
+    cast=int,
+)
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="no-reply@jiralite.local")
 EMAIL_BACKEND = config(
     "EMAIL_BACKEND",
@@ -215,6 +217,10 @@ PROJECT_INVITATION_EXPIRY_HOURS = config(
     "PROJECT_INVITATION_EXPIRY_HOURS",
     default=48,
     cast=int,
+)
+BACKEND_BASE_URL = config(
+    "BACKEND_BASE_URL",
+    default="http://127.0.0.1:8000",
 )
 FRONTEND_ACCEPT_INVITATION_URL = config(
     "FRONTEND_ACCEPT_INVITATION_URL",

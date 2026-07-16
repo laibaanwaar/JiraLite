@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import DatabaseError
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -48,9 +49,19 @@ class ProfileApiTests(APITestCase):
         response = self.client.get(self.profile_url)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_patch_profile_requires_authentication(self):
+        self.client.credentials()
+        response = self.client.patch(self.profile_url, {"bio": "Hello"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
     def test_get_profile_rejects_invalid_token(self):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer invalid-token")
         response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_patch_profile_rejects_invalid_token(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer invalid-token")
+        response = self.client.patch(self.profile_url, {"bio": "Hello"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_get_profile_rejects_expired_token(self):
@@ -65,6 +76,12 @@ class ProfileApiTests(APITestCase):
         self.user.is_active = False
         self.user.save(update_fields=["is_active"])
         response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_patch_profile_rejects_inactive_user(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        response = self.client.patch(self.profile_url, {"bio": "Hello"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_get_profile_existing_profile(self):
@@ -96,9 +113,35 @@ class ProfileApiTests(APITestCase):
         self.assertEqual(self.user.first_name, "Sarah")
         self.assertEqual(self.user.profile.phone, "+92 300-1234567")
         self.assertEqual(self.user.profile.bio, "Product builder.")
+        self.assertNotIn("password", response.data["data"])
+        self.assertNotIn("date_joined", response.data["data"])
+        self.assertNotIn("created_at", response.data["data"])
+        self.assertNotIn("updated_at", response.data["data"])
+
+    def test_patch_profile_updates_all_allowed_fields(self):
+        response = self.client.patch(
+            self.profile_url,
+            {
+                "first_name": "Sara",
+                "last_name": "Awan",
+                "phone": "+92 300 1234567",
+                "bio": "Backend developer working on JiraLite.",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Sara")
+        self.assertEqual(self.user.last_name, "Awan")
+        self.assertEqual(self.user.profile.phone, "+92 300 1234567")
+        self.assertEqual(self.user.profile.bio, "Backend developer working on JiraLite.")
 
     def test_patch_profile_rejects_blank_name(self):
         response = self.client.patch(self.profile_url, {"first_name": "   "}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_profile_rejects_blank_last_name(self):
+        response = self.client.patch(self.profile_url, {"last_name": "   "}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_patch_profile_rejects_invalid_phone(self):
@@ -108,6 +151,80 @@ class ProfileApiTests(APITestCase):
     def test_patch_profile_rejects_long_bio(self):
         response = self.client.patch(self.profile_url, {"bio": "a" * 501}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_profile_rejects_email_change(self):
+        original_email = self.user.email
+        response = self.client.patch(
+            self.profile_url,
+            {"email": "new@example.com"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, original_email)
+
+    def test_patch_profile_rejects_password_change(self):
+        original_password = self.user.password
+        response = self.client.patch(
+            self.profile_url,
+            {"password": "AnotherPassword@123"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.password, original_password)
+
+    def test_patch_profile_rejects_restricted_fields(self):
+        response = self.client.patch(
+            self.profile_url,
+            {"user_id": 999, "is_superuser": True},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("user_id", response.data["errors"])
+        self.assertIn("is_superuser", response.data["errors"])
+
+    def test_patch_profile_rejects_unknown_fields(self):
+        response = self.client.patch(
+            self.profile_url,
+            {"nickname": "builder"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("nickname", response.data["errors"])
+
+    def test_patch_profile_creates_missing_profile_for_old_user(self):
+        response = self.client.patch(
+            self.profile_url,
+            {"bio": "Updated profile description."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
+        self.assertEqual(response.data["data"]["profile"]["bio"], "Updated profile description.")
+
+    def test_user_cannot_update_another_users_profile(self):
+        other_user = User.objects.create_user(
+            first_name="Ali",
+            last_name="Khan",
+            email="other@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        UserProfile.objects.create(user=other_user, phone="+1 555 0000", bio="Other profile")
+
+        response = self.client.patch(
+            self.profile_url,
+            {"user_id": other_user.id, "bio": "Hijack attempt"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        other_user.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(other_user.profile.bio, "Other profile")
+        self.assertFalse(UserProfile.objects.filter(user=self.user).exists())
 
     def test_patch_profile_updates_image(self):
         response = self.client.patch(
@@ -153,6 +270,20 @@ class ProfileApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_patch_profile_rejects_oversized_image(self):
+        response = self.client.patch(
+            self.profile_url,
+            {
+                "profile_image": SimpleUploadedFile(
+                    "avatar.png",
+                    b"\x89PNG\r\n\x1a\n" + (b"a" * (5 * 1024 * 1024)),
+                    content_type="image/png",
+                )
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_delete_avatar_success(self):
         self.client.patch(
             self.profile_url,
@@ -181,3 +312,20 @@ class ProfileApiTests(APITestCase):
                 format="json",
             )
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @override_settings(MEDIA_ROOT="D:/JiraLite/Backend/.tmp-test-media")
+    def test_profile_update_rolls_back_when_update_fails(self):
+        with patch(
+            "accounts.models.user_profile.UserProfile.save",
+            side_effect=DatabaseError("db write failed"),
+        ):
+            response = self.client.patch(
+                self.profile_url,
+                {"first_name": "Changed", "bio": "Should rollback"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Sara")
+        self.assertFalse(UserProfile.objects.filter(user=self.user).exists())

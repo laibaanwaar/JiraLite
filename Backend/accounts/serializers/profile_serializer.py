@@ -4,6 +4,20 @@ from rest_framework import serializers
 
 
 PHONE_PATTERN = re.compile(r"^[0-9+\-() ]+$")
+ALLOWED_UPDATE_FIELDS = {"first_name", "last_name", "phone", "bio", "profile_image"}
+RESTRICTED_FIELDS = {
+    "id",
+    "user_id",
+    "email",
+    "password",
+    "is_active",
+    "is_staff",
+    "is_superuser",
+    "is_email_verified",
+    "date_joined",
+    "created_at",
+    "updated_at",
+}
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_IMAGE_SIGNATURES = (
     (b"\xff\xd8\xff", "jpg"),
@@ -22,6 +36,28 @@ class ProfileSerializer(serializers.Serializer):
     bio = serializers.CharField(required=False, allow_blank=True, max_length=500)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+    def validate(self, attrs):
+        provided_fields = set(getattr(self, "initial_data", {}).keys())
+        restricted_fields = sorted(provided_fields & RESTRICTED_FIELDS)
+        if restricted_fields:
+            raise serializers.ValidationError(
+                {
+                    field: ["This field cannot be updated."]
+                    for field in restricted_fields
+                }
+            )
+
+        unknown_fields = sorted(provided_fields - ALLOWED_UPDATE_FIELDS - RESTRICTED_FIELDS)
+        if unknown_fields:
+            raise serializers.ValidationError(
+                {
+                    field: ["This field is not allowed."]
+                    for field in unknown_fields
+                }
+            )
+
+        return attrs
 
     def validate_first_name(self, value):
         normalized = value.strip()
@@ -85,9 +121,6 @@ class ProfileSerializer(serializers.Serializer):
             "email": user.email,
             "is_email_verified": user.is_email_verified,
             "is_active": user.is_active,
-            "date_joined": user.date_joined,
-            "created_at": profile.created_at,
-            "updated_at": profile.updated_at,
             "profile": {
                 "id": profile.id,
                 "profile_image": image_url,

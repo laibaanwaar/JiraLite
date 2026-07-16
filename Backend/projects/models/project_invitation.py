@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from projects.models.project import Project
 
@@ -61,6 +62,13 @@ class ProjectInvitation(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "invited_email"],
+                condition=Q(status="PENDING"),
+                name="unique_pending_project_invitation_per_email",
+            )
+        ]
 
     def save(self, *args, **kwargs):
         self.invited_email = (self.invited_email or "").strip().lower()

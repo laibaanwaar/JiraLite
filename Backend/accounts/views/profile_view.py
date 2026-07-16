@@ -72,6 +72,15 @@ class ProfileView(APIView):
     def patch(self, request):
         serializer = ProfileSerializer(data=request.data, partial=True, context={"request": request})
         try:
+            if not request.user.is_active:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Your account is inactive.",
+                        "errors": {},
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             serializer.is_valid(raise_exception=True)
             payload = ProfileService.update_profile(
                 user=request.user,

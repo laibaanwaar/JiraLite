@@ -26,10 +26,14 @@ class ProjectInvitationEmailService:
 
     @staticmethod
     def build_accept_link(token: str) -> str:
-        base_url = getattr(settings, "FRONTEND_ACCEPT_INVITATION_URL", "").strip()
+        base_url = getattr(settings, "PROJECT_INVITATION_RESPONSE_URL", "").strip()
         if not base_url:
-            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000").rstrip("/")
-            base_url = f"{frontend_url}/accept-invitation"
+            backend_url = getattr(settings, "BACKEND_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+            base_url = f"{backend_url}/project-invitations/respond/"
+        if not base_url:
+            frontend_url = getattr(settings, "FRONTEND_ACCEPT_INVITATION_URL", "").strip()
+            if frontend_url:
+                base_url = frontend_url
         separator = "&" if "?" in base_url else "?"
         return f"{base_url}{separator}token={token}"
 

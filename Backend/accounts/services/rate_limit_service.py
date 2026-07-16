@@ -58,7 +58,7 @@ class RateLimitService:
             f"resend-ip-hour:{ip_address}",
             limit=ip_hour_limit,
             ttl_seconds=3600,
-            message="Too many verification email requests. Please try again later.",
+            message="Too many OTP requests. Please try again later.",
         )
 
     @staticmethod
@@ -69,11 +69,11 @@ class RateLimitService:
             f"resend-cooldown:{email}",
             limit=1,
             ttl_seconds=cooldown_seconds,
-            message="Please wait before requesting another verification email.",
+            message="Please wait before requesting another OTP.",
         )
         RateLimitService._hit(
             f"resend-email-hour:{email}",
             limit=email_hour_limit,
             ttl_seconds=3600,
-            message="Too many verification email requests. Please try again later.",
+            message="Too many OTP requests. Please try again later.",
         )

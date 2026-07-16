@@ -32,6 +32,7 @@ User = get_user_model()
 class AuthService:
     LOGIN_INPUT_MAX_LENGTH = 254
     PASSWORD_INPUT_MAX_LENGTH = 128
+    MAX_OTP_FAILED_ATTEMPTS = 5
 
     @staticmethod
     def normalize_email(email: str) -> str:
@@ -63,7 +64,10 @@ class AuthService:
         if password != confirm_password:
             raise ValidationError({"confirm_password": ["Passwords do not match."]})
 
-        validate_email(normalized_email)
+        try:
+            validate_email(normalized_email)
+        except ValidationError as exc:
+            raise ValidationError({"email": exc.messages}) from exc
 
         if cast(Any, User.objects).filter(email__iexact=normalized_email).exists():
             raise IntegrityError("Duplicate email.")
@@ -73,11 +77,15 @@ class AuthService:
             last_name=last_name.strip(),
             email=normalized_email,
         )
-        validate_password(password, user=probe_user)
+        try:
+            validate_password(password, user=probe_user)
+        except ValidationError as exc:
+            raise ValidationError({"password": exc.messages}) from exc
 
-        raw_token = VerificationEmailService.generate_token()
-        token_hash = VerificationEmailService.hash_token(raw_token)
+        raw_otp = VerificationEmailService.generate_otp()
+        otp_hash = VerificationEmailService.hash_otp(raw_otp)
         expires_at = VerificationEmailService.get_expiry()
+        now = timezone.now()
 
         with cast(Any, transaction).atomic():
             user = cast(Any, User.objects).create_user(
@@ -90,28 +98,25 @@ class AuthService:
             )
             EmailVerification.objects.create(
                 user=user,
-                token_hash=token_hash,
+                otp_hash=otp_hash,
                 expires_at=expires_at,
+                failed_attempts=0,
                 used_at=None,
+                last_sent_at=now,
             )
             UserProfile.objects.create(user=user)
-            transaction.on_commit(
-                lambda: VerificationEmailService.send_verification_email(
-                    recipient_email=user.email,
-                    first_name=user.first_name,
-                    token=raw_token,
-                )
+            VerificationEmailService.send_verification_email(
+                recipient_email=user.email,
+                first_name=user.first_name,
+                otp=raw_otp,
             )
 
         return {
-            "message": "Signup successful. Please verify your email.",
+            "success": True,
+            "message": "Signup successful. An OTP has been sent to your email.",
             "data": {
-                "id": user.id,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
                 "email": user.email,
                 "is_email_verified": user.is_email_verified,
-                "is_active": user.is_active,
             },
         }
 
@@ -166,42 +171,81 @@ class AuthService:
         }
 
     @staticmethod
-    def verify_email(*, token: str) -> dict:
-        normalized_token = token.strip()
-        if not normalized_token:
-            raise InvalidTokenError("Invalid verification token.")
+    def verify_email(*, email: str, code: str) -> dict:
+        normalized_email = AuthService.normalize_email(email)
+        normalized_code = (code or "").strip()
+        if not normalized_email:
+            raise ValidationError({"email": ["This field is required."]})
+        if not normalized_code:
+            raise ValidationError({"code": ["This field is required."]})
+        validate_email(normalized_email)
+        if len(normalized_code) != 6 or not normalized_code.isdigit():
+            raise ValidationError({"code": ["Enter a valid 6-digit verification code."]})
 
-        token_hash = VerificationEmailService.hash_token(normalized_token)
-
+        deferred_validation_error = None
         with cast(Any, transaction).atomic():
             try:
-                verification = cast(Any, EmailVerification.objects).select_for_update().select_related("user").get(
-                    token_hash=token_hash
+                verification = (
+                    cast(Any, EmailVerification.objects)
+                    .select_for_update()
+                    .select_related("user")
+                    .filter(
+                        user__email__iexact=normalized_email,
+                        used_at__isnull=True,
+                    )
+                    .latest("created_at")
                 )
             except ObjectDoesNotExist as exc:
-                raise InvalidTokenError("Invalid verification token.") from exc
+                raise ValidationError(
+                    {"code": ["The verification code is incorrect."]}
+                ) from exc
 
             user = verification.user
             if user is None or not user.is_active:
-                raise InvalidTokenError("Invalid verification token.")
+                raise ValidationError({"code": ["The verification code is incorrect."]})
 
             if user.is_email_verified:
-                return {"message": "Email is already verified."}
-
-            if verification.used_at is not None:
-                raise InvalidTokenError("This verification token is no longer valid.")
+                return {
+                    "message": "Email verified successfully.",
+                    "data": {
+                        "email": user.email,
+                        "is_verified": True,
+                    },
+                }
 
             if verification.expires_at <= timezone.now():
-                raise ExpiredTokenError(
-                    "This verification token has expired. Please request a new one."
+                raise ValidationError(
+                    {"code": ["Request a new verification code."]}
                 )
 
-            verification.used_at = timezone.now()
-            verification.save(update_fields=["used_at"])
-            user.is_email_verified = True
-            user.save(update_fields=["is_email_verified"])
+            if verification.failed_attempts >= AuthService.MAX_OTP_FAILED_ATTEMPTS:
+                raise ValidationError(
+                    {"code": ["The verification code is incorrect."]}
+                )
 
-        return {"message": "Email verified successfully."}
+            submitted_code_hash = VerificationEmailService.hash_otp(normalized_code)
+            if verification.otp_hash != submitted_code_hash:
+                verification.failed_attempts += 1
+                verification.save(update_fields=["failed_attempts"])
+                deferred_validation_error = ValidationError(
+                    {"code": ["The verification code is incorrect."]}
+                )
+            else:
+                verification.used_at = timezone.now()
+                verification.save(update_fields=["used_at"])
+                user.is_email_verified = True
+                user.save(update_fields=["is_email_verified"])
+
+        if deferred_validation_error is not None:
+            raise deferred_validation_error
+
+        return {
+            "message": "Email verified successfully.",
+            "data": {
+                "email": user.email,
+                "is_verified": True,
+            },
+        }
 
     @staticmethod
     def resend_verification(*, email: str, request) -> dict:
@@ -211,7 +255,10 @@ class AuthService:
         )
 
         response = {
-            "message": "If the account is eligible, a verification email has been sent."
+            "success": True,
+            "message": "If the account is eligible, a new OTP has been sent."
+            ,
+            "data": None,
         }
 
         try:
@@ -224,26 +271,29 @@ class AuthService:
 
         RateLimitService.check_resend_email_limits(email=normalized_email)
 
-        raw_token = VerificationEmailService.generate_token()
-        token_hash = VerificationEmailService.hash_token(raw_token)
+        raw_otp = VerificationEmailService.generate_otp()
+        otp_hash = VerificationEmailService.hash_otp(raw_otp)
         expires_at = VerificationEmailService.get_expiry()
+        now = timezone.now()
 
         with cast(Any, transaction).atomic():
             cast(Any, EmailVerification.objects).filter(
                 user=user,
                 used_at__isnull=True,
-            ).update(used_at=timezone.now())
+            ).update(used_at=now)
             EmailVerification.objects.create(
                 user=user,
-                token_hash=token_hash,
+                otp_hash=otp_hash,
                 expires_at=expires_at,
+                failed_attempts=0,
                 used_at=None,
+                last_sent_at=now,
             )
             transaction.on_commit(
                 lambda: VerificationEmailService.send_verification_email(
                     recipient_email=user.email,
                     first_name=user.first_name,
-                    token=raw_token,
+                    otp=raw_otp,
                 )
             )
 
