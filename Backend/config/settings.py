@@ -211,3 +211,12 @@ LOGIN_IP_LIMIT_PER_MINUTE = config(
     default=20,
     cast=int,
 )
+PROJECT_INVITATION_EXPIRY_HOURS = config(
+    "PROJECT_INVITATION_EXPIRY_HOURS",
+    default=48,
+    cast=int,
+)
+FRONTEND_ACCEPT_INVITATION_URL = config(
+    "FRONTEND_ACCEPT_INVITATION_URL",
+    default="",
+)

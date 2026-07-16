@@ -11,7 +11,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from accounts.models import EmailVerification
+from accounts.models import EmailVerification, UserProfile
 from accounts.services.email_service import VerificationEmailService
 from accounts.services.exceptions import (
     AccountInactiveError,
@@ -94,6 +94,7 @@ class AuthService:
                 expires_at=expires_at,
                 used_at=None,
             )
+            UserProfile.objects.create(user=user)
             transaction.on_commit(
                 lambda: VerificationEmailService.send_verification_email(
                     recipient_email=user.email,

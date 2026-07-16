@@ -3,10 +3,12 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.settings import api_settings
 
 from accounts.models import UserProfile
 
@@ -37,11 +39,47 @@ class ProfileApiTests(APITestCase):
         response = self.client.get(self.profile_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(UserProfile.objects.filter(user=self.user).exists())
+        self.assertIn("profile", response.data["data"])
+        self.assertEqual(response.data["data"]["full_name"], "Sara Ahmed")
+        self.assertNotIn("password", response.data["data"])
 
     def test_get_profile_requires_authentication(self):
         self.client.credentials()
         response = self.client.get(self.profile_url)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_get_profile_rejects_invalid_token(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer invalid-token")
+        response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_get_profile_rejects_expired_token(self):
+        refresh = RefreshToken.for_user(self.user)
+        access = refresh.access_token
+        access.set_exp(lifetime=-api_settings.ACCESS_TOKEN_LIFETIME)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(access)}")
+        response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_get_profile_rejects_inactive_user(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_get_profile_existing_profile(self):
+        UserProfile.objects.create(user=self.user, phone="+92 300", bio="Hello")
+        response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["profile"]["phone"], "+92 300")
+
+    def test_get_profile_handles_database_error(self):
+        with patch(
+            "accounts.services.profile_service.ProfileService.get_profile_payload",
+            side_effect=DatabaseError("db"),
+        ):
+            response = self.client.get(self.profile_url)
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def test_patch_profile_partial_update_json(self):
         response = self.client.patch(
