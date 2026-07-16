@@ -5,6 +5,7 @@ import ProjectFilters from '../../components/projects/ProjectFilters.jsx'
 import ProjectListSkeleton from '../../components/projects/ProjectListSkeleton.jsx'
 import ProjectTable from '../../components/projects/ProjectTable.jsx'
 import useProjects from '../../hooks/useProjects.js'
+import { deleteProject, normalizeProjectError } from '../../services/projectService.js'
 
 const PAGE_SIZE = 5
 
@@ -32,8 +33,11 @@ export default function ProjectsPage() {
   const [role, setRole] = useState('')
   const [search, setSearch] = useState('')
   const [notice] = useState(window.history.state?.projectsNotice || '')
-  const { errorMessage, isLoading, projects } = useProjects({ role, search })
+  const { errorMessage, isLoading, projects, refreshProjects } = useProjects({ role, search })
   const [page, setPage] = useState(1)
+  const [deleteMessage, setDeleteMessage] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const [deletingProjectId, setDeletingProjectId] = useState(null)
 
   useEffect(() => {
     if (!window.history.state?.projectsNotice) {
@@ -52,6 +56,45 @@ export default function ProjectsPage() {
   const totalPages = Math.max(1, Math.ceil(projects.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
   const visibleProjects = projects.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  const handleDeleteProject = (project) => {
+    if (!project?.id || deletingProjectId) {
+      return
+    }
+
+    setDeletingProjectId(project.id)
+    setDeleteMessage('')
+    setDeleteError('')
+
+    deleteProject(project.id)
+      .then((response) => {
+        setDeleteMessage(response?.message || 'Project deleted successfully.')
+        refreshProjects()
+      })
+      .catch((error) => {
+        const normalized = normalizeProjectError(error)
+
+        if (normalized.shouldRedirectToLogin) {
+          window.history.replaceState(
+            {
+              authNotice: {
+                message: normalized.message,
+                type: 'warning',
+              },
+            },
+            '',
+            '/login',
+          )
+          window.dispatchEvent(new PopStateEvent('popstate'))
+          return
+        }
+
+        setDeleteError(normalized.message || 'Unable to delete project right now.')
+      })
+      .finally(() => {
+        setDeletingProjectId(null)
+      })
+  }
 
   return (
     <AppShell activePath="/projects">
@@ -77,6 +120,18 @@ export default function ProjectsPage() {
           </p>
         ) : null}
 
+        {deleteMessage ? (
+          <p className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700" role="status">
+            {deleteMessage}
+          </p>
+        ) : null}
+
+        {deleteError ? (
+          <p className="mt-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="alert">
+            {deleteError}
+          </p>
+        ) : null}
+
         <ProjectFilters role={role} search={search} onRoleChange={setRole} onSearchChange={setSearch} />
 
         {errorMessage ? (
@@ -92,6 +147,8 @@ export default function ProjectsPage() {
         {!isLoading && !errorMessage && projects.length > 0 ? (
           <ProjectTable
             currentPage={safePage}
+            deletingProjectId={deletingProjectId}
+            onDeleteProject={handleDeleteProject}
             onPageChange={setPage}
             pageSize={PAGE_SIZE}
             projects={visibleProjects}

@@ -127,6 +127,26 @@ export async function createProject(projectPayload, accessToken = getAccessToken
   return response.data
 }
 
+export async function deleteProject(projectId, accessToken = getAccessToken()) {
+  const response = await axios.delete(`${API_BASE}/api/projects/${projectId}/`, {
+    headers: authHeaders(accessToken),
+  })
+  return response.data
+}
+
+export async function getProject(projectId, accessToken = getAccessToken(), options = {}) {
+  const response = await axios.get(`${API_BASE}/api/projects/${projectId}/`, {
+    headers: authHeaders(accessToken),
+    signal: options.signal,
+    timeout: options.timeout || 10000,
+  })
+
+  return {
+    project: response.data?.data || null,
+    message: response.data?.message || '',
+  }
+}
+
 export async function acceptProjectInvitation(payload, accessToken = getAccessToken()) {
   const response = await axios.post(`${API_BASE}/api/project-invitations/accept/`, payload, {
     headers: {

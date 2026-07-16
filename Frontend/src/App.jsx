@@ -6,6 +6,7 @@ import ProjectInvitationResponsePage from './pages/ProjectInvitationResponsePage
 import ResendVerificationPage from './pages/ResendVerificationPage.jsx'
 import TaskCommentsPage from './pages/TaskCommentsPage.jsx'
 import CreateProjectPage from './pages/projects/CreateProjectPage.jsx'
+import ProjectDetailPage from './pages/projects/ProjectDetailPage.jsx'
 import ProjectsPage from './pages/projects/ProjectsPage.jsx'
 import SignupPage from './pages/SignupPage.jsx'
 import CreateTaskPage from './pages/tasks/CreateTaskPage.jsx'
@@ -47,6 +48,7 @@ function usePathname() {
 export default function App() {
   const pathname = usePathname()
   const isAuthenticated = Boolean(getAccessToken())
+  const projectDetailMatch = pathname.match(/^\/projects\/(\d+)$/)
   const taskDetailMatch = pathname.match(/^\/tasks\/(\d+)$/)
   const taskEditMatch = pathname.match(/^\/tasks\/(\d+)\/edit$/)
 
@@ -98,6 +100,10 @@ export default function App() {
 
   if (pathname === '/projects/create') {
     return isAuthenticated ? <CreateProjectPage /> : <LoginPage />
+  }
+
+  if (projectDetailMatch) {
+    return isAuthenticated ? <ProjectDetailPage projectId={projectDetailMatch[1]} /> : <LoginPage />
   }
 
   if (pathname === '/task-comment') {

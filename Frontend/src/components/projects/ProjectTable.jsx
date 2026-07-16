@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+
 function FolderIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
@@ -138,16 +140,44 @@ function getCount(value) {
   return value
 }
 
+function navigateToProject(projectId) {
+  window.history.pushState({}, '', `/projects/${projectId}`)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 export default function ProjectTable({
   currentPage,
+  deletingProjectId,
+  onDeleteProject,
   onPageChange,
   pageSize,
   projects,
   totalCount,
 }) {
+  const [openMenuProjectId, setOpenMenuProjectId] = useState(null)
+  const menuRef = useRef(null)
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const startItem = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1
   const endItem = Math.min(currentPage * pageSize, totalCount)
+
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      if (!menuRef.current || menuRef.current.contains(event.target)) {
+        return
+      }
+
+      setOpenMenuProjectId(null)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [])
+
+  const handleDelete = (project) => {
+    setOpenMenuProjectId(null)
+    onDeleteProject(project)
+  }
 
   return (
     <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -210,17 +240,35 @@ export default function ProjectTable({
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
+                      onClick={() => navigateToProject(project.id)}
                       className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-900 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
                     >
                       View
                     </button>
-                    <button
-                      type="button"
-                      className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
-                      aria-label={`Open actions for ${project.name}`}
-                    >
-                      <DotsIcon />
-                    </button>
+                    <div className="relative" ref={openMenuProjectId === project.id ? menuRef : null}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenMenuProjectId((currentId) => (currentId === project.id ? null : project.id))}
+                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
+                        aria-expanded={openMenuProjectId === project.id}
+                        aria-label={`Open actions for ${project.name}`}
+                      >
+                        <DotsIcon />
+                      </button>
+
+                      {openMenuProjectId === project.id ? (
+                        <div className="absolute right-0 z-20 mt-2 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-[0_16px_34px_rgba(15,23,42,0.12)]">
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(project)}
+                            disabled={deletingProjectId === project.id}
+                            className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {deletingProjectId === project.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </td>
               </tr>

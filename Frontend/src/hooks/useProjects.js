@@ -19,6 +19,7 @@ export default function useProjects({ role = '', search = '' } = {}) {
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
   const [serverMessage, setServerMessage] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
   const requestIdRef = useRef(0)
 
   const normalizedRole = role.trim().toUpperCase()
@@ -63,7 +64,7 @@ export default function useProjects({ role = '', search = '' } = {}) {
       })
 
     return () => controller.abort()
-  }, [])
+  }, [refreshKey])
 
   const filteredProjects = useMemo(() => {
     return projects.filter((project) => {
@@ -82,6 +83,7 @@ export default function useProjects({ role = '', search = '' } = {}) {
     errorMessage,
     isLoading,
     projects: filteredProjects,
+    refreshProjects: () => setRefreshKey((currentKey) => currentKey + 1),
     serverMessage,
   }
 }
