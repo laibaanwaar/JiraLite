@@ -13,21 +13,6 @@ function navigateTo(path) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M12 5v14M5 12h14"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
 export default function AdminDashboardPage() {
   const {
     dashboardData,
@@ -115,16 +100,6 @@ export default function AdminDashboardPage() {
                     </label>
                   ) : null}
 
-                  {permissions.can_create_project ? (
-                    <button
-                      type="button"
-                      onClick={() => navigateTo('/projects/create')}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-[#4b36f4] px-6 py-4 text-base font-extrabold text-white shadow-[0_16px_34px_rgba(75,54,244,0.28)] transition hover:bg-[#3726c9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
-                    >
-                      <PlusIcon />
-                      New Project
-                    </button>
-                  ) : null}
                 </div>
               </div>
 
