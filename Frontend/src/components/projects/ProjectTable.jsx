@@ -145,7 +145,13 @@ function navigateToProject(projectId) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+function navigateToProjectTasks(projectId) {
+  window.history.pushState({}, '', `/projects/${projectId}/tasks`)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 export default function ProjectTable({
+  canManageProjects = true,
   currentPage,
   deletingProjectId,
   onDeleteProject,
@@ -225,10 +231,15 @@ export default function ProjectTable({
                   </span>
                 </td>
                 <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-2 text-sm font-bold text-slate-600">
+                  <button
+                    type="button"
+                    onClick={() => navigateToProjectTasks(project.id)}
+                    className="inline-flex items-center gap-2 rounded-lg px-2 py-1 text-sm font-bold text-slate-600 transition hover:bg-[#f3f1ff] hover:text-[#4b36f4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
+                    aria-label={`View tasks for ${project.name}`}
+                  >
                     <TasksIcon />
                     {getCount(project.total_tasks)}
-                  </span>
+                  </button>
                 </td>
                 <td className="whitespace-pre-line px-5 py-4 text-sm font-semibold leading-6 text-slate-600">
                   {formatDateTime(project.created_at)}
@@ -245,30 +256,32 @@ export default function ProjectTable({
                     >
                       View
                     </button>
-                    <div className="relative" ref={openMenuProjectId === project.id ? menuRef : null}>
-                      <button
-                        type="button"
-                        onClick={() => setOpenMenuProjectId((currentId) => (currentId === project.id ? null : project.id))}
-                        className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
-                        aria-expanded={openMenuProjectId === project.id}
-                        aria-label={`Open actions for ${project.name}`}
-                      >
-                        <DotsIcon />
-                      </button>
+                    {canManageProjects ? (
+                      <div className="relative" ref={openMenuProjectId === project.id ? menuRef : null}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenMenuProjectId((currentId) => (currentId === project.id ? null : project.id))}
+                          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-900 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4]"
+                          aria-expanded={openMenuProjectId === project.id}
+                          aria-label={`Open actions for ${project.name}`}
+                        >
+                          <DotsIcon />
+                        </button>
 
-                      {openMenuProjectId === project.id ? (
-                        <div className="absolute right-0 z-20 mt-2 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-[0_16px_34px_rgba(15,23,42,0.12)]">
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(project)}
-                            disabled={deletingProjectId === project.id}
-                            className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {deletingProjectId === project.id ? 'Deleting...' : 'Delete'}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
+                        {openMenuProjectId === project.id ? (
+                          <div className="absolute right-0 z-20 mt-2 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-[0_16px_34px_rgba(15,23,42,0.12)]">
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(project)}
+                              disabled={deletingProjectId === project.id}
+                              className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {deletingProjectId === project.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </td>
               </tr>

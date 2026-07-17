@@ -1,25 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { clearAuthSession, getAccessToken, getStoredUser } from '../services/authService.js'
-import { getProfile, getProfileErrorDetails, updateProfile } from '../services/profileService.js'
-
-const REDIRECT_PATH_KEY = 'postLoginRedirectPath'
+import {
+  clearAuthSession,
+  getAccessToken,
+  getCurrentUser,
+  getStoredUser,
+  storePostLoginRedirectPath,
+} from '../services/authService.js'
+import { getProfileErrorDetails, updateProfile } from '../services/profileService.js'
+import useAuth from './useAuth.js'
 
 function navigateToLogin() {
-  sessionStorage.setItem(REDIRECT_PATH_KEY, window.location.pathname)
+  storePostLoginRedirectPath(window.location.pathname)
   window.history.pushState({}, '', '/login')
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-export function getPostLoginRedirectPath() {
-  return sessionStorage.getItem(REDIRECT_PATH_KEY)
-}
-
-export function clearPostLoginRedirectPath() {
-  sessionStorage.removeItem(REDIRECT_PATH_KEY)
-}
-
 export default function useProfile() {
-  const [profile, setProfile] = useState(() => getStoredUser())
+  const { updateUser, user } = useAuth()
+  const [profile, setProfile] = useState(() => user || getStoredUser())
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -52,9 +50,10 @@ export default function useProfile() {
     setErrorMessage('')
     setFieldErrors({})
 
-    return getProfile(token)
+    return getCurrentUser(token)
       .then((nextProfile) => {
         setProfile(nextProfile)
+        updateUser(nextProfile)
         return nextProfile
       })
       .catch((error) => {
@@ -64,11 +63,17 @@ export default function useProfile() {
       .finally(() => {
         setIsLoading(false)
       })
-  }, [handleServiceError])
+  }, [handleServiceError, updateUser])
 
   useEffect(() => {
     refreshProfile()
   }, [refreshProfile])
+
+  useEffect(() => {
+    if (user) {
+      setProfile(user)
+    }
+  }, [user])
 
   const saveProfile = useCallback(
     async (payload) => {
@@ -89,6 +94,7 @@ export default function useProfile() {
       try {
         const nextProfile = await updateProfile(payload, token)
         setProfile(nextProfile)
+        updateUser(nextProfile)
         setSuccessMessage('Profile updated successfully.')
         return { ok: true, profile: nextProfile }
       } catch (error) {
@@ -98,7 +104,7 @@ export default function useProfile() {
         setIsSaving(false)
       }
     },
-    [handleServiceError],
+    [handleServiceError, updateUser],
   )
 
   return {

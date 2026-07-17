@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import useAuth from '../../hooks/useAuth.js'
+import {
+  clearPostLoginRedirectPath,
+  consumeAuthNotice,
+  getPostLoginRedirectPath,
+} from '../../services/authService.js'
+import { getDashboardPathForRole } from '../../utils/auth.js'
+import { navigateTo } from '../../utils/navigation.js'
 import FormInput from './FormInput.jsx'
 import PasswordInput from './PasswordInput.jsx'
-import { consumeAuthNotice, loginUser, storeAuthSession } from '../../services/authService.js'
-import { clearPostLoginRedirectPath, getPostLoginRedirectPath } from '../../hooks/useProfile.js'
-import { getProfile } from '../../services/profileService.js'
 
 function MailIcon() {
   return (
@@ -35,16 +40,33 @@ function LockIcon() {
   )
 }
 
-export default function LoginForm() {
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())
+}
+
+function getInitialEmail() {
+  const historyEmail = window.history.state?.prefillEmail
+  const signupEmail = sessionStorage.getItem('signupEmail')
+
+  return String(historyEmail || signupEmail || '').trim()
+}
+
+function getInitialNotice() {
   const rawNotice = window.history.state?.authNotice || window.history.state?.message || consumeAuthNotice()
-  const initialNotice =
-    typeof rawNotice === 'string'
-      ? { message: rawNotice, type: 'success' }
-      : rawNotice
+
+  return typeof rawNotice === 'string'
+    ? { message: rawNotice, type: 'success' }
+    : rawNotice
+}
+
+export default function LoginForm() {
+  const { login } = useAuth()
+  const initialNotice = useMemo(() => getInitialNotice(), [])
   const [formValues, setFormValues] = useState({
-    email: '',
+    email: getInitialEmail(),
     password: '',
   })
+  const [fieldErrors, setFieldErrors] = useState({})
   const [rememberMe, setRememberMe] = useState(false)
   const [isPasswordVisible, setIsPasswordVisible] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -59,87 +81,89 @@ export default function LoginForm() {
       ...currentValues,
       [name]: value,
     }))
+    setFieldErrors((currentErrors) => ({
+      ...currentErrors,
+      [name]: '',
+    }))
   }
 
   const navigateToSignup = (event) => {
     event.preventDefault()
-    window.history.pushState({}, '', '/signup')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo('/signup')
   }
 
-  const navigateToProfile = () => {
-    const redirectPath = getPostLoginRedirectPath() || '/profile'
-    clearPostLoginRedirectPath()
-    window.history.pushState({}, '', redirectPath)
-    window.dispatchEvent(new PopStateEvent('popstate'))
+  const validate = () => {
+    const nextErrors = {}
+
+    if (!formValues.email.trim()) {
+      nextErrors.email = 'Email is required.'
+    } else if (!isValidEmail(formValues.email)) {
+      nextErrors.email = 'Enter a valid email address.'
+    }
+
+    if (!formValues.password) {
+      nextErrors.password = 'Password is required.'
+    }
+
+    setFieldErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
     setSubmitError('')
     setSubmitSuccess('')
     setSubmitWarning('')
 
-    const loginPayload = {
-      email: formValues.email.trim(),
-      password: formValues.password,
+    if (!validate()) {
+      return
     }
 
     setIsSubmitting(true)
 
-    loginUser(loginPayload)
-      .then((data) => {
-        const accessToken = data?.data?.access || data?.access || data?.token
-        const refreshToken = data?.data?.refresh || data?.refresh
-        const user = data?.data?.user
-        const session = {
-          accessToken,
-          refreshToken,
-          rememberMe,
+    try {
+      const result = await login({
+        email: formValues.email.trim(),
+        password: formValues.password,
+        rememberMe,
+      })
+
+      setSubmitSuccess('Login successful.')
+      sessionStorage.removeItem('signupEmail')
+
+      const redirectPath = window.history.state?.returnUrl || getPostLoginRedirectPath()
+      const destination =
+        redirectPath && redirectPath !== '/login' && redirectPath !== '/signup'
+          ? redirectPath
+          : getDashboardPathForRole(result.roleCode)
+
+      clearPostLoginRedirectPath()
+      navigateTo(destination, { replace: true })
+    } catch (error) {
+      const fallbackMessage = 'Login failed. Please check your email and password.'
+      const responseData = error?.response?.data
+
+      if (typeof responseData === 'string') {
+        setSubmitError(responseData)
+        return
+      }
+
+      if (responseData && typeof responseData === 'object') {
+        const nextFieldErrors = {
+          email: Array.isArray(responseData.email) ? responseData.email[0] : '',
+          password: Array.isArray(responseData.password) ? responseData.password[0] : '',
         }
+        const firstError = Object.values(responseData).flat().find(Boolean)
 
-        storeAuthSession({
-          accessToken,
-          refreshToken,
-          user,
-          rememberMe,
-        })
+        setFieldErrors(nextFieldErrors)
+        setSubmitError(firstError || responseData.message || fallbackMessage)
+        return
+      }
 
-        return getProfile(accessToken).then((profile) => ({
-          profile,
-          session,
-        }))
-      })
-      .then(({ profile, session }) => {
-        storeAuthSession({
-          accessToken: session.accessToken,
-          refreshToken: session.refreshToken,
-          user: profile,
-          rememberMe: session.rememberMe,
-        })
-        setSubmitSuccess('Login successful.')
-        navigateToProfile()
-      })
-      .catch((error) => {
-        const fallbackMessage = 'Login failed. Please check your email and password.'
-        const responseData = error?.response?.data
-
-        if (typeof responseData === 'string') {
-          setSubmitError(responseData)
-          return
-        }
-
-        if (responseData && typeof responseData === 'object') {
-          const firstError = Object.values(responseData).flat().find(Boolean)
-          setSubmitError(firstError || fallbackMessage)
-          return
-        }
-
-        setSubmitError(fallbackMessage)
-      })
-      .finally(() => {
-        setIsSubmitting(false)
-      })
+      setSubmitError(fallbackMessage)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -154,6 +178,8 @@ export default function LoginForm() {
         placeholder="Enter your email"
         autoComplete="email"
         icon={<MailIcon />}
+        error={fieldErrors.email}
+        required
       />
 
       <PasswordInput
@@ -167,6 +193,8 @@ export default function LoginForm() {
         isVisible={isPasswordVisible}
         onToggleVisibility={() => setIsPasswordVisible((currentValue) => !currentValue)}
         icon={<LockIcon />}
+        error={fieldErrors.password}
+        required
       />
 
       <div className="flex items-center justify-between gap-4 text-[0.95rem]">
@@ -220,7 +248,7 @@ export default function LoginForm() {
       <button
         type="submit"
         className="min-h-[58px] rounded-xl border-0 bg-linear-to-r from-[#4030e8] via-[#4b36f4] to-[#3827d9] text-[1.05rem] font-bold text-white shadow-[0_16px_26px_rgba(64,48,232,0.26)] transition duration-150 hover:enabled:-translate-y-px hover:enabled:shadow-[0_20px_30px_rgba(64,48,232,0.3)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(64,48,232,0.28)] active:enabled:translate-y-0 active:enabled:shadow-[0_12px_22px_rgba(64,48,232,0.24)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
-        disabled={isSubmitting || !formValues.email.trim() || !formValues.password}
+        disabled={isSubmitting}
       >
         {isSubmitting ? 'Logging in...' : 'Login'}
       </button>

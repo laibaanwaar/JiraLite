@@ -1,25 +1,11 @@
 import { useState } from 'react'
-import { clearAuthSession, logoutUser, storeAuthNotice } from '../../services/authService.js'
-
-const navigationItems = [
-  { label: 'Dashboard', path: '/dashboard', icon: DashboardIcon },
-  { label: 'Profile', path: '/profile', icon: ProfileIcon },
-  { label: 'Projects', path: '/projects', icon: FolderIcon },
-  { label: 'Tasks', path: '/tasks', icon: TasksIcon },
-  { label: 'Task Comment', path: '/task-comment', icon: TaskCommentIcon },
-]
+import useAuth from '../../hooks/useAuth.js'
+import { storeAuthNotice } from '../../services/authService.js'
+import { navigateTo } from '../../utils/navigation.js'
 
 function navigate(event, href, onNavigate, options = {}) {
   event?.preventDefault()
-  const historyState = options.state || {}
-
-  if (options.replace) {
-    window.history.replaceState(historyState, '', href)
-  } else {
-    window.history.pushState(historyState, '', href)
-  }
-
-  window.dispatchEvent(new PopStateEvent('popstate'))
+  navigateTo(href, options)
   onNavigate?.()
 }
 
@@ -31,21 +17,6 @@ function BrandMark() {
       <span className="absolute bottom-1 left-5 h-6 w-1.5 rounded-sm bg-current" />
       <span className="absolute left-0 top-2.5 h-1.5 w-3 rounded-full bg-current" />
     </div>
-  )
-}
-
-function ProfileIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M12 12a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5Zm-6 7a6 6 0 0 1 12 0"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
   )
 }
 
@@ -94,21 +65,6 @@ function TasksIcon() {
   )
 }
 
-function TaskCommentIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M6.25 7.25h11.5M6.25 11.25h7.5M7 18.25l-2.25 2v-14a1 1 0 0 1 1-1h12.5a1 1 0 0 1 1 1v10.5a1 1 0 0 1-1 1H7Z"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
-
 function LogoutIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
@@ -125,7 +81,14 @@ function LogoutIcon() {
 }
 
 export default function Sidebar({ activePath = '/profile', onNavigate }) {
+  const { logout, user } = useAuth()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const roleCode = user?.role?.code || ''
+  const navigationItems = [
+    { label: 'Dashboard', path: '/dashboard', icon: DashboardIcon },
+    { label: 'Projects', path: '/projects', icon: FolderIcon },
+    { label: 'Tasks', path: '/tasks', icon: TasksIcon, allowedRoles: ['ADMIN'] },
+  ].filter((item) => !item.allowedRoles || item.allowedRoles.includes(roleCode))
 
   const handleLogout = async (event) => {
     event.preventDefault()
@@ -137,9 +100,7 @@ export default function Sidebar({ activePath = '/profile', onNavigate }) {
     setIsLoggingOut(true)
 
     try {
-      const result = await logoutUser()
-
-      clearAuthSession()
+      const result = await logout()
       storeAuthNotice({
         message: result.message,
         type: result.variant,
@@ -155,7 +116,6 @@ export default function Sidebar({ activePath = '/profile', onNavigate }) {
         },
       })
     } catch {
-      clearAuthSession()
       storeAuthNotice({
         message: 'You have been signed out on this device, but the server could not confirm logout.',
         type: 'warning',
@@ -189,9 +149,9 @@ export default function Sidebar({ activePath = '/profile', onNavigate }) {
       <nav className="flex flex-1 flex-col gap-1" aria-label="Main navigation">
         {navigationItems.map((item) => {
           const Icon = item.icon
-          const isActive = activePath === item.path || (item.path === '/projects' && activePath === '/projects/create')
-          const isNavigable =
-            item.path === '/dashboard' || item.path === '/profile' || item.path === '/projects' || item.path === '/tasks' || item.path === '/task-comment'
+          const isActive =
+            activePath === item.path ||
+            (item.path === '/projects' && (activePath === '/projects/create' || activePath.startsWith('/projects/')))
           const itemClassName = `flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
             isActive
               ? 'bg-[#eef0ff] text-[#4030e8]'
@@ -202,8 +162,8 @@ export default function Sidebar({ activePath = '/profile', onNavigate }) {
             <button
               key={item.label}
               type="button"
-              className={`${itemClassName} text-left ${isNavigable ? 'cursor-pointer' : 'cursor-default'}`}
-              onClick={isNavigable ? (event) => navigate(event, item.path, onNavigate) : undefined}
+              className={`${itemClassName} cursor-pointer text-left`}
+              onClick={(event) => navigate(event, item.path, onNavigate)}
               aria-current={isActive ? 'page' : undefined}
             >
               <Icon />

@@ -1,3 +1,5 @@
+import ProfileAvatar from './ProfileAvatar.jsx'
+
 function MailIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -35,22 +37,18 @@ export default function ProfileCard({ onEdit, profile }) {
   const email = profile?.email || ''
   const phone = profile?.profile?.phone || ''
   const bio = profile?.profile?.bio || ''
-  const avatarUrl = profile?.profile?.profile_image
-  const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase() || 'JL'
+  const role = profile?.role?.name || profile?.role?.code || profile?.role_code || profile?.role || 'Member'
 
   return (
     <>
       <div className="mt-8 flex flex-col gap-6 sm:flex-row sm:items-start">
-        <div className="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-slate-800 via-slate-500 to-[#c98152] text-4xl font-extrabold text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)]">
-          {avatarUrl ? (
-            <img src={avatarUrl} alt="" className="h-full w-full rounded-full object-cover" />
-          ) : (
-            initials
-          )}
-        </div>
+        <ProfileAvatar interactive={false} size="lg" user={profile} />
 
         <div className="min-w-0 flex-1 pt-1">
           <h2 className="m-0 text-2xl font-extrabold text-slate-900">{fullName || 'Profile'}</h2>
+          <p className="mt-2 inline-flex rounded-full bg-[#eef0ff] px-3 py-1 text-xs font-black uppercase tracking-wide text-[#4030e8]">
+            {role}
+          </p>
           <dl className="mt-4 grid gap-3 text-sm font-semibold text-slate-600">
             {email ? (
               <div className="flex items-center gap-3">

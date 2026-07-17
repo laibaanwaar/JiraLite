@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import EmailChipsInput, { validateInviteEmail } from './EmailChipsInput.jsx'
+import EmailChipsInput from './EmailChipsInput.jsx'
+import { validateInviteEmail } from './emailValidation.js'
 import { createProject, normalizeProjectError } from '../../services/projectService.js'
 
 function FieldError({ children }) {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ProfileAvatar from '../profile/ProfileAvatar.jsx'
 import Sidebar from './Sidebar.jsx'
 
 function MenuIcon() {
@@ -47,19 +48,23 @@ export default function AppShell({
           </div>
         ) : null}
 
-        <main
-          className={`min-w-0 flex-1 bg-linear-to-b from-[#fcfdff] via-white to-[#f8fbff] px-5 py-6 sm:px-8 md:px-10 md:py-8 ${mainClassName}`}
-        >
-          <button
-            type="button"
-            onClick={() => setIsSidebarOpen(true)}
-            className="mb-6 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4] md:hidden"
-          >
-            <MenuIcon />
-            Menu
-          </button>
+        <main className="min-w-0 flex-1 bg-linear-to-b from-[#fcfdff] via-white to-[#f8fbff]">
+          <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-5 backdrop-blur sm:px-8 md:justify-end md:px-10">
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4b36f4] md:hidden"
+            >
+              <MenuIcon />
+              Menu
+            </button>
 
-          {children}
+            <ProfileAvatar />
+          </header>
+
+          <div className={`px-5 py-6 sm:px-8 md:px-10 md:py-8 ${mainClassName}`}>
+            {children}
+          </div>
         </main>
       </div>
     </div>

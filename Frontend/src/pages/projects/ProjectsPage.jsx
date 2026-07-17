@@ -4,6 +4,7 @@ import ProjectEmptyState from '../../components/projects/ProjectEmptyState.jsx'
 import ProjectFilters from '../../components/projects/ProjectFilters.jsx'
 import ProjectListSkeleton from '../../components/projects/ProjectListSkeleton.jsx'
 import ProjectTable from '../../components/projects/ProjectTable.jsx'
+import useAuth from '../../hooks/useAuth.js'
 import useProjects from '../../hooks/useProjects.js'
 import { deleteProject, normalizeProjectError } from '../../services/projectService.js'
 
@@ -30,6 +31,7 @@ function navigateToCreateProject() {
 }
 
 export default function ProjectsPage() {
+  const { roleCode } = useAuth()
   const [role, setRole] = useState('')
   const [search, setSearch] = useState('')
   const [notice] = useState(window.history.state?.projectsNotice || '')
@@ -52,6 +54,7 @@ export default function ProjectsPage() {
   }, [role, search])
 
   const hasNoFilters = !role && !search.trim()
+  const canManageProjects = roleCode === 'ADMIN'
   const showEmptyState = !isLoading && !errorMessage && projects.length === 0 && hasNoFilters
   const totalPages = Math.max(1, Math.ceil(projects.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
@@ -103,15 +106,17 @@ export default function ProjectsPage() {
           <h1 id="projects-title" className="m-0 text-4xl font-black text-slate-900">
             Projects
           </h1>
-          <button
-            type="button"
-            onClick={navigateToCreateProject}
-            aria-label="Create new project"
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#4b36f4] px-6 text-sm font-extrabold text-white shadow-[0_12px_24px_rgba(75,54,244,0.18)] transition hover:bg-[#3827d9] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#4b36f4]/30"
-          >
-            <PlusIcon />
-            New Project
-          </button>
+          {canManageProjects ? (
+            <button
+              type="button"
+              onClick={navigateToCreateProject}
+              aria-label="Create new project"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#4b36f4] px-6 text-sm font-extrabold text-white shadow-[0_12px_24px_rgba(75,54,244,0.18)] transition hover:bg-[#3827d9] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#4b36f4]/30"
+            >
+              <PlusIcon />
+              New Project
+            </button>
+          ) : null}
         </div>
 
         {notice ? (
@@ -153,6 +158,7 @@ export default function ProjectsPage() {
             pageSize={PAGE_SIZE}
             projects={visibleProjects}
             totalCount={projects.length}
+            canManageProjects={canManageProjects}
           />
         ) : null}
 

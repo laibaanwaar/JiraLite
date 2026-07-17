@@ -2,22 +2,8 @@ import { useEffect, useState } from 'react'
 import AppShell from '../components/layout/AppShell.jsx'
 import EditProfileForm from '../components/profile/EditProfileForm.jsx'
 import ProfileCard from '../components/profile/ProfileCard.jsx'
+import ProfileAvatar from '../components/profile/ProfileAvatar.jsx'
 import useProfile from '../hooks/useProfile.js'
-
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M17.5 10.5a5.5 5.5 0 0 0-11 0v3.75L5 17h14l-1.5-2.75V10.5ZM10 19h4"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
 
 export default function ProfilePage() {
   const {
@@ -44,8 +30,6 @@ export default function ProfilePage() {
   const firstName = profile?.first_name || ''
   const lastName = profile?.last_name || ''
   const fullName = profile?.full_name || `${firstName} ${lastName}`.trim() || profile?.email || ''
-  const avatarUrl = profile?.profile?.profile_image
-  const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase() || 'JL'
 
   const handleEditOpen = () => {
     setSuccessMessage('')
@@ -68,40 +52,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <AppShell activePath="/profile" mainClassName="px-0 py-0">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-5 md:justify-end md:px-8">
-          <div className="flex items-center gap-2 text-lg font-extrabold text-slate-900 md:hidden">
-            <span className="text-[#2d5bff]">Jira</span>Lite
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-              aria-label="Notifications"
-            >
-              <BellIcon />
-            </button>
-            <div
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-linear-to-br from-[#243b6b] via-[#c1784a] to-[#f4c29a] text-xs font-bold text-white shadow-sm"
-              aria-label={`${fullName} profile avatar`}
-              role="img"
-            >
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt=""
-                  className="h-full w-full rounded-full object-cover"
-                />
-              ) : (
-                initials
-              )}
-            </div>
-          </div>
-        </header>
-
-        <main className="flex-1 px-5 py-6 md:px-10 md:py-8">
-          <section className="max-w-[720px]" aria-labelledby="profile-title">
+    <AppShell activePath="/profile">
+      <section className="max-w-[720px]" aria-labelledby="profile-title">
             <h1 id="profile-title" className="m-0 text-2xl font-extrabold text-slate-900">
               My Profile
             </h1>
@@ -145,17 +97,7 @@ export default function ProfilePage() {
             {!isLoading && profile && isEditing ? (
               <>
                 <div className="mt-8 flex flex-col gap-6 sm:flex-row sm:items-start">
-                  <div
-                    className="flex h-32 w-32 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-slate-800 via-slate-500 to-[#c98152] text-4xl font-extrabold text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)]"
-                    aria-label={`${fullName} profile avatar`}
-                    role="img"
-                  >
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt="" className="h-full w-full rounded-full object-cover" />
-                    ) : (
-                      initials
-                    )}
-                  </div>
+                  <ProfileAvatar interactive={false} size="lg" user={profile} />
 
                   <div className="min-w-0 flex-1 pt-1">
                     <h2 className="m-0 text-2xl font-extrabold text-slate-900">
@@ -176,9 +118,7 @@ export default function ProfilePage() {
                 />
               </>
             ) : null}
-          </section>
-        </main>
-      </div>
+      </section>
     </AppShell>
   )
 }

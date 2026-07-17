@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import AppShell from '../../components/layout/AppShell.jsx'
 import Pagination from '../../components/common/Pagination.jsx'
 import TaskEmptyState from '../../components/tasks/TaskEmptyState.jsx'
 import TaskFilters from '../../components/tasks/TaskFilters.jsx'
 import TaskTable from '../../components/tasks/TaskTable.jsx'
 import TaskTableSkeleton from '../../components/tasks/TaskTableSkeleton.jsx'
+import useAuth from '../../hooks/useAuth.js'
+import useTaskCommentCounts from '../../hooks/useTaskCommentCounts.js'
 import useTasks from '../../hooks/useTasks.js'
 import { getProjects } from '../../services/projectService.js'
-import { getStoredUser } from '../../services/authService.js'
 
 function PlusIcon() {
   return (
@@ -25,6 +26,7 @@ function PlusIcon() {
 }
 
 export default function TasksPage() {
+  const { roleCode, user } = useAuth()
   const [filters, setFilters] = useState({
     project_id: '',
     status: '',
@@ -33,14 +35,17 @@ export default function TasksPage() {
   })
   const [searchValue, setSearchValue] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [projects, setProjects] = useState([])
-  const currentUser = useMemo(() => getStoredUser(), [])
-  const { count, errorMessage, isLoading, tasks } = useTasks({
+  const [notice, setNotice] = useState('')
+  const canCreateTasks = roleCode === 'ADMIN' || roleCode === 'OWNER'
+  const { count, errorMessage, isLoading, next, previous, refetch, tasks, totalPages } = useTasks({
     filters,
-    mode: 'all',
+    mode: canCreateTasks ? 'all' : 'mine',
     page,
-    pageSize: 10,
+    pageSize,
   })
+  const commentCounts = useTaskCommentCounts(tasks)
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -56,7 +61,13 @@ export default function TasksPage() {
       search: nextSearch,
     })
     setSearchValue(nextSearch)
-    setPage(Number(url.searchParams.get('page') || 1))
+    setPage(Math.max(1, Number(url.searchParams.get('page') || 1)))
+    setPageSize(Math.max(1, Number(url.searchParams.get('page_size') || 10)))
+    setNotice(window.history.state?.tasksNotice || '')
+
+    if (window.history.state?.tasksNotice) {
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+    }
   }, [])
 
   useEffect(() => {
@@ -72,7 +83,7 @@ export default function TasksPage() {
     const timeoutId = window.setTimeout(() => {
       setFilters((current) => ({
         ...current,
-        search: searchValue,
+        search: searchValue.trim(),
       }))
       setPage(1)
     }, 400)
@@ -88,8 +99,9 @@ export default function TasksPage() {
       priority: filters.priority,
       search: filters.search,
       page: String(page),
+      page_size: String(pageSize),
     }).forEach(([key, value]) => {
-      if (value) {
+      if (value && !(key === 'page' && value === '1') && !(key === 'page_size' && value === '10')) {
         url.searchParams.set(key, value)
       } else {
         url.searchParams.delete(key)
@@ -97,7 +109,13 @@ export default function TasksPage() {
     })
 
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`)
-  }, [filters, page])
+  }, [filters, page, pageSize])
+
+  useEffect(() => {
+    if (!isLoading && count > 0 && page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [count, isLoading, page, totalPages])
 
   const updateFilter = (event) => {
     const { name, value } = event.target
@@ -127,6 +145,11 @@ export default function TasksPage() {
     setPage(1)
   }
 
+  const updatePageSize = (nextPageSize) => {
+    setPageSize(nextPageSize)
+    setPage(1)
+  }
+
   const goTo = (path) => {
     window.history.pushState({}, '', path)
     window.dispatchEvent(new PopStateEvent('popstate'))
@@ -139,14 +162,16 @@ export default function TasksPage() {
               <h1 id="tasks-title" className="m-0 text-3xl font-extrabold text-slate-900">
                 Tasks
               </h1>
-              <button
-                type="button"
-                onClick={() => goTo('/tasks/create')}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-linear-to-r from-[#4b36f4] to-[#3827d9] px-5 text-sm font-extrabold text-white shadow-[0_12px_24px_rgba(64,48,232,0.2)] transition hover:-translate-y-px hover:shadow-[0_16px_28px_rgba(64,48,232,0.26)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#4b36f4]/30"
-              >
-                <PlusIcon />
-                New Task
-              </button>
+              {canCreateTasks ? (
+                <button
+                  type="button"
+                  onClick={() => goTo('/tasks/create')}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-linear-to-r from-[#4b36f4] to-[#3827d9] px-5 text-sm font-extrabold text-white shadow-[0_12px_24px_rgba(64,48,232,0.2)] transition hover:-translate-y-px hover:shadow-[0_16px_28px_rgba(64,48,232,0.26)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[#4b36f4]/30"
+                >
+                  <PlusIcon />
+                  New Task
+                </button>
+              ) : null}
             </div>
 
             <TaskFilters
@@ -160,12 +185,18 @@ export default function TasksPage() {
               projects={projects}
             />
 
+            {notice ? (
+              <p className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700" role="status">
+                {notice}
+              </p>
+            ) : null}
+
             {errorMessage ? (
               <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-6 py-5">
                 <p className="m-0 text-sm font-semibold text-rose-700">{errorMessage}</p>
                 <button
                   type="button"
-                  onClick={() => window.dispatchEvent(new PopStateEvent('popstate'))}
+                  onClick={refetch}
                   className="mt-3 rounded-lg border border-rose-300 px-4 py-2 text-sm font-bold text-rose-700 transition hover:bg-rose-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
                 >
                   Retry
@@ -178,19 +209,36 @@ export default function TasksPage() {
             {!isLoading && !errorMessage && tasks.length > 0 ? (
               <>
                 <TaskTable
+                  commentCounts={commentCounts}
                   onDelete={(task) => goTo(`/tasks/${task.id}`)}
                   onEdit={(task) => goTo(`/tasks/${task.id}/edit`)}
+                  onComments={(task) => goTo(`/tasks/${task.id}/comments`)}
                   onUpdateStatus={(task) => goTo(`/tasks/${task.id}/edit`)}
                   onView={(task) => goTo(`/tasks/${task.id}`)}
+                  currentPage={page}
+                  pageSize={pageSize}
                   tasks={tasks}
-                  userId={currentUser?.id}
+                  userId={user?.id}
                 />
-                <Pagination currentPage={page} pageSize={10} totalCount={count} onPageChange={setPage} />
+                <Pagination
+                  currentPage={page}
+                  hasNext={next ? true : page < totalPages}
+                  hasPrevious={previous ? true : page > 1}
+                  onPageChange={setPage}
+                  onPageSizeChange={updatePageSize}
+                  pageSize={pageSize}
+                  totalCount={count}
+                  totalPages={totalPages}
+                />
               </>
             ) : null}
 
             {!isLoading && !errorMessage && tasks.length === 0 ? (
-              <TaskEmptyState isFiltered={hasActiveFilters} onClearFilters={clearFilters} onCreate={() => goTo('/tasks/create')} />
+              <TaskEmptyState
+                isFiltered={hasActiveFilters}
+                onClearFilters={clearFilters}
+                onCreate={canCreateTasks ? () => goTo('/tasks/create') : undefined}
+              />
             ) : null}
           </section>
     </AppShell>

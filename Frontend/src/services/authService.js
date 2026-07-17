@@ -31,6 +31,23 @@ export function getRefreshToken() {
   return getStoredValue(REFRESH_TOKEN_KEY)
 }
 
+export function storePostLoginRedirectPath(path) {
+  if (!path) {
+    sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
+    return
+  }
+
+  sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, path)
+}
+
+export function getPostLoginRedirectPath() {
+  return sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY)
+}
+
+export function clearPostLoginRedirectPath() {
+  sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
+}
+
 export function storeAuthSession({ accessToken, refreshToken, user, rememberMe = false }) {
   const storage = getStorage(rememberMe)
   const otherStorage = rememberMe ? sessionStorage : localStorage
@@ -198,6 +215,10 @@ export async function signupUser(payload) {
   return response.data
 }
 
+export async function signupAdmin(payload) {
+  return signupUser(payload)
+}
+
 export async function verifyEmail(payload) {
   const response = await axios.post(
     `${API_BASE}/api/auth/verify-email/`,
@@ -222,6 +243,15 @@ export async function resendVerification(payload) {
 export async function loginUser(payload) {
   const response = await axios.post(`${API_BASE}/api/auth/login/`, payload)
   return response.data
+}
+
+export async function getCurrentUser(accessToken = getAccessToken()) {
+  const response = await axios.get(`${API_BASE}/api/auth/me/`, {
+    headers: authHeaders(accessToken),
+  })
+  const user = response.data?.data?.user || response.data?.user || response.data?.data || response.data
+  updateStoredUser(user)
+  return user
 }
 
 export async function logoutUser(refreshToken = getRefreshToken(), accessToken = getAccessToken()) {

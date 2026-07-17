@@ -23,18 +23,123 @@ function buildConfig(accessToken = getAccessToken(), options = {}) {
 }
 
 function normalizeTaskListResponse(data) {
-  const payload = data?.data
+  const payload = data?.data || data || {}
+  const results = Array.isArray(payload?.results)
+    ? payload.results
+    : Array.isArray(data?.results)
+      ? data.results
+      : []
 
   return {
-    count: Number(payload?.count || 0),
-    results: Array.isArray(payload?.results) ? payload.results : [],
+    count: Number(payload?.count ?? results.length),
+    next: payload?.next || null,
+    previous: payload?.previous || null,
+    results: results.map(normalizeTask),
     message: data?.message || '',
+  }
+}
+
+function normalizeAssignee(assignee) {
+  const user = assignee?.user || assignee || {}
+  const firstName = user?.first_name || assignee?.first_name || ''
+  const lastName = user?.last_name || assignee?.last_name || ''
+  const email = user?.email || assignee?.email || ''
+  const assigneeId = assignee?.project_member_id || assignee?.id || assignee?.assignee_id || ''
+
+  return {
+    id: assigneeId,
+    project_member_id: assigneeId,
+    user_id: assignee?.user_id || user?.id || '',
+    first_name: firstName,
+    last_name: lastName,
+    email,
+    name: [firstName, lastName].filter(Boolean).join(' ') || 'Unassigned',
+  }
+}
+
+function normalizeTask(task) {
+  const project = task?.project || {}
+  const assignee = normalizeAssignee(task?.assignee)
+
+  return {
+    ...task,
+    id: task?.id,
+    title: task?.title || 'Untitled Task',
+    project: {
+      id: project?.id || task?.project_id || '',
+      name: project?.name || task?.project_name || 'Unknown project',
+    },
+    projectId: project?.id || task?.project_id || '',
+    projectName: project?.name || task?.project_name || 'Unknown project',
+    status: task?.status || 'TO_DO',
+    priority: task?.priority || 'MEDIUM',
+    assignee,
+    assigneeId: assignee.project_member_id,
+    assigneeName: assignee.name,
+    assigneeEmail: assignee.email,
+    due_date: task?.due_date || task?.dueDate || '',
+    dueDate: task?.due_date || task?.dueDate || '',
+    permissions: {
+      canView: true,
+      canEdit: Boolean(task?.permissions?.canEdit ?? task?.permissions?.can_edit),
+      canDelete: Boolean(task?.permissions?.canDelete ?? task?.permissions?.can_delete),
+      canUpdateStatus: Boolean(task?.permissions?.canUpdateStatus ?? task?.permissions?.can_update_status),
+    },
   }
 }
 
 function normalizeTaskResponse(data) {
   return {
-    task: data?.data || null,
+    task: data?.data ? normalizeTask(data.data) : null,
+    message: data?.message || '',
+  }
+}
+
+function normalizeComment(comment) {
+  const author = comment?.author || comment?.user || comment?.created_by || {}
+  const firstName = author?.first_name || comment?.author_first_name || ''
+  const lastName = author?.last_name || comment?.author_last_name || ''
+  const role = author?.role?.code || author?.role || comment?.role || comment?.author_role || ''
+
+  return {
+    ...comment,
+    id: comment?.id,
+    content: comment?.content || comment?.body || comment?.text || '',
+    created_at: comment?.created_at || comment?.createdAt || '',
+    updated_at: comment?.updated_at || comment?.updatedAt || '',
+    can_edit: Boolean(comment?.can_edit ?? comment?.permissions?.can_edit ?? comment?.permissions?.canEdit),
+    can_delete: Boolean(comment?.can_delete ?? comment?.permissions?.can_delete ?? comment?.permissions?.canDelete),
+    author: {
+      ...author,
+      first_name: firstName,
+      last_name: lastName,
+      email: author?.email || comment?.author_email || '',
+      role,
+      name: [firstName, lastName].filter(Boolean).join(' ') || author?.name || comment?.author_name || 'Unknown user',
+    },
+  }
+}
+
+function normalizeCommentListResponse(data) {
+  const payload = data?.data || data || {}
+  const results = Array.isArray(payload?.results)
+    ? payload.results
+    : Array.isArray(payload?.comments)
+      ? payload.comments
+      : Array.isArray(payload)
+        ? payload
+        : []
+
+  return {
+    count: Number(payload?.count ?? results.length),
+    message: data?.message || '',
+    results: results.map(normalizeComment),
+  }
+}
+
+function normalizeCommentResponse(data) {
+  return {
+    comment: data?.data ? normalizeComment(data.data) : normalizeComment(data),
     message: data?.message || '',
   }
 }
@@ -206,5 +311,46 @@ export async function deleteTask(taskId, options = {}) {
   return {
     success: Boolean(response.data?.success),
     message: response.data?.message || 'Task deleted successfully.',
+  }
+}
+
+export async function getTaskComments(taskId, options = {}) {
+  const response = await axios.get(`${API_BASE}/api/tasks/${taskId}/comments/`, buildConfig(options.accessToken, options))
+  return normalizeCommentListResponse(response.data)
+}
+
+export async function createTaskComment(taskId, payload, options = {}) {
+  const response = await axios.post(
+    `${API_BASE}/api/tasks/${taskId}/comments/`,
+    payload,
+    buildConfig(options.accessToken, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }),
+  )
+  return normalizeCommentResponse(response.data)
+}
+
+export async function updateTaskComment(commentId, payload, options = {}) {
+  const response = await axios.patch(
+    `${API_BASE}/api/comments/${commentId}/`,
+    payload,
+    buildConfig(options.accessToken, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }),
+  )
+  return normalizeCommentResponse(response.data)
+}
+
+export async function deleteTaskComment(commentId, options = {}) {
+  const response = await axios.delete(`${API_BASE}/api/comments/${commentId}/`, buildConfig(options.accessToken, options))
+  return {
+    success: Boolean(response.data?.success ?? true),
+    message: response.data?.message || 'Comment deleted successfully.',
   }
 }

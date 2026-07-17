@@ -5,12 +5,19 @@ import { canCreateTask } from '../../components/tasks/taskPermissions.js'
 import { getProjects } from '../../services/projectService.js'
 import { createTask, normalizeTaskError } from '../../services/taskService.js'
 
-function navigateTo(path) {
-  window.history.pushState({}, '', path)
+function navigateTo(path, options = {}) {
+  if (options.replace) {
+    window.history.replaceState(options.state || {}, '', path)
+  } else {
+    window.history.pushState(options.state || {}, '', path)
+  }
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
 export default function CreateTaskPage() {
+  const url = new URL(window.location.href)
+  const initialProjectId = url.searchParams.get('project_id') || ''
+  const returnTo = url.searchParams.get('return_to') || ''
   const [projects, setProjects] = useState([])
   const [isLoadingProjects, setIsLoadingProjects] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
@@ -64,6 +71,14 @@ export default function CreateTaskPage() {
     return projects.filter(canCreateTask)
   }, [projects])
 
+  const initialValues = useMemo(() => {
+    return initialProjectId ? { project_id: initialProjectId } : undefined
+  }, [initialProjectId])
+
+  const safeReturnTo = useMemo(() => {
+    return returnTo.startsWith('/projects/') || returnTo === '/tasks' ? returnTo : ''
+  }, [returnTo])
+
   const handleSubmit = async (values) => {
     setIsSubmitting(true)
     setErrorMessage('')
@@ -80,8 +95,12 @@ export default function CreateTaskPage() {
         due_date: values.due_date || null,
       })
 
-      setSuccessMessage(response.message || 'Task created successfully.')
-      navigateTo(`/tasks/${response.task?.id || ''}`)
+      const message = response.message || 'Task created successfully.'
+      setSuccessMessage(message)
+      navigateTo(safeReturnTo || '/tasks?page=1', {
+        replace: true,
+        state: { tasksNotice: message },
+      })
     } catch (error) {
       const normalized = normalizeTaskError(error)
       setErrorMessage(normalized.message)
@@ -124,8 +143,9 @@ export default function CreateTaskPage() {
             ) : (
               <TaskForm
                 backendErrors={fieldErrors}
+                initialValues={initialValues}
                 isSubmitting={isSubmitting}
-                onCancel={() => navigateTo('/tasks')}
+                onCancel={() => navigateTo(safeReturnTo || '/tasks')}
                 onSubmit={handleSubmit}
                 projects={creatableProjects}
               />

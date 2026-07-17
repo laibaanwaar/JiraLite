@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { signupAdmin } from '../../services/authService.js'
+import { navigateTo } from '../../utils/navigation.js'
 import FormInput from './FormInput.jsx'
 import PasswordInput from './PasswordInput.jsx'
-import { signupUser } from '../../services/authService.js'
 
 function UserIcon() {
   return (
@@ -48,6 +49,14 @@ function LockIcon() {
   )
 }
 
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())
+}
+
+function isStrongPassword(value) {
+  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(String(value || ''))
+}
+
 export default function SignupForm() {
   const [formValues, setFormValues] = useState({
     firstName: '',
@@ -57,6 +66,7 @@ export default function SignupForm() {
     confirmPassword: '',
   })
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [submitSuccess, setSubmitSuccess] = useState('')
@@ -72,6 +82,10 @@ export default function SignupForm() {
       ...currentValues,
       [name]: value,
     }))
+    setFieldErrors((currentErrors) => ({
+      ...currentErrors,
+      [name]: '',
+    }))
   }
 
   const handleToggleVisibility = (fieldName) => {
@@ -83,23 +97,52 @@ export default function SignupForm() {
 
   const handleLoginNavigation = (event) => {
     event.preventDefault()
-    window.history.pushState({}, '', '/login')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo('/login')
   }
 
-  const navigateToVerifyEmail = (email) => {
-    sessionStorage.setItem('signupEmail', email)
-    window.history.pushState({ email }, '', '/verify-email')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+  const validate = () => {
+    const nextErrors = {}
+
+    if (!formValues.firstName.trim()) {
+      nextErrors.firstName = 'First name is required.'
+    }
+
+    if (!formValues.lastName.trim()) {
+      nextErrors.lastName = 'Last name is required.'
+    }
+
+    if (!formValues.email.trim()) {
+      nextErrors.email = 'Email is required.'
+    } else if (!isValidEmail(formValues.email)) {
+      nextErrors.email = 'Enter a valid email address.'
+    }
+
+    if (!formValues.password) {
+      nextErrors.password = 'Password is required.'
+    } else if (!isStrongPassword(formValues.password)) {
+      nextErrors.password = 'Use at least 8 characters with upper, lower, number, and special character.'
+    }
+
+    if (!formValues.confirmPassword) {
+      nextErrors.confirmPassword = 'Confirm your password.'
+    } else if (formValues.password !== formValues.confirmPassword) {
+      nextErrors.confirmPassword = 'Passwords do not match.'
+    }
+
+    if (!acceptedTerms) {
+      nextErrors.terms = 'You must accept the terms to continue.'
+    }
+
+    setFieldErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
     setSubmitError('')
     setSubmitSuccess('')
 
-    if (formValues.password !== formValues.confirmPassword) {
-      setSubmitError('Passwords do not match.')
+    if (!validate()) {
       return
     }
 
@@ -113,39 +156,45 @@ export default function SignupForm() {
 
     setIsSubmitting(true)
 
-    signupUser(signupPayload)
-      .then(() => {
-        setSubmitSuccess('Your account has been created successfully.')
-        setFormValues({
-          firstName: '',
-          lastName: '',
-          email: '',
-          password: '',
-          confirmPassword: '',
-        })
-        setAcceptedTerms(false)
-        navigateToVerifyEmail(signupPayload.email)
+    try {
+      await signupAdmin(signupPayload)
+      sessionStorage.setItem('signupEmail', signupPayload.email)
+      setSubmitSuccess('Your admin account has been created successfully.')
+      navigateTo('/login', {
+        replace: true,
+        state: {
+          message: 'Your admin account has been created successfully. Please log in.',
+          prefillEmail: signupPayload.email,
+        },
       })
-      .catch((error) => {
-        const fallbackMessage = 'Signup failed. Please check your details and try again.'
-        const responseData = error?.response?.data
+    } catch (error) {
+      const fallbackMessage = 'Signup failed. Please check your details and try again.'
+      const responseData = error?.response?.data
 
-        if (typeof responseData === 'string') {
-          setSubmitError(responseData)
-          return
+      if (typeof responseData === 'string') {
+        setSubmitError(responseData)
+        return
+      }
+
+      if (responseData && typeof responseData === 'object') {
+        const nextFieldErrors = {
+          firstName: Array.isArray(responseData.first_name) ? responseData.first_name[0] : '',
+          lastName: Array.isArray(responseData.last_name) ? responseData.last_name[0] : '',
+          email: Array.isArray(responseData.email) ? responseData.email[0] : '',
+          password: Array.isArray(responseData.password) ? responseData.password[0] : '',
+          confirmPassword: Array.isArray(responseData.confirm_password) ? responseData.confirm_password[0] : '',
         }
+        const firstError = Object.values(responseData).flat().find(Boolean)
 
-        if (responseData && typeof responseData === 'object') {
-          const firstError = Object.values(responseData).flat().find(Boolean)
-          setSubmitError(firstError || fallbackMessage)
-          return
-        }
+        setFieldErrors(nextFieldErrors)
+        setSubmitError(firstError || responseData.message || fallbackMessage)
+        return
+      }
 
-        setSubmitError(fallbackMessage)
-      })
-      .finally(() => {
-        setIsSubmitting(false)
-      })
+      setSubmitError(fallbackMessage)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -160,6 +209,8 @@ export default function SignupForm() {
           placeholder="Enter your first name"
           autoComplete="given-name"
           icon={<UserIcon />}
+          error={fieldErrors.firstName}
+          required
         />
         <FormInput
           id="lastName"
@@ -170,6 +221,8 @@ export default function SignupForm() {
           placeholder="Enter your last name"
           autoComplete="family-name"
           icon={<UserIcon />}
+          error={fieldErrors.lastName}
+          required
         />
       </div>
 
@@ -183,6 +236,8 @@ export default function SignupForm() {
         placeholder="Enter your email address"
         autoComplete="email"
         icon={<MailIcon />}
+        error={fieldErrors.email}
+        required
       />
 
       <PasswordInput
@@ -196,6 +251,8 @@ export default function SignupForm() {
         isVisible={passwordVisibility.password}
         onToggleVisibility={() => handleToggleVisibility('password')}
         icon={<LockIcon />}
+        error={fieldErrors.password}
+        required
       />
 
       <PasswordInput
@@ -209,6 +266,8 @@ export default function SignupForm() {
         isVisible={passwordVisibility.confirmPassword}
         onToggleVisibility={() => handleToggleVisibility('confirmPassword')}
         icon={<LockIcon />}
+        error={fieldErrors.confirmPassword}
+        required
       />
 
       <label className="flex items-start gap-3 text-[0.95rem] leading-[1.55] text-slate-500 max-[480px]:gap-2.5 max-[480px]:text-[0.92rem]" htmlFor="terms">
@@ -217,7 +276,13 @@ export default function SignupForm() {
           name="terms"
           type="checkbox"
           checked={acceptedTerms}
-          onChange={(event) => setAcceptedTerms(event.target.checked)}
+          onChange={(event) => {
+            setAcceptedTerms(event.target.checked)
+            setFieldErrors((currentErrors) => ({
+              ...currentErrors,
+              terms: '',
+            }))
+          }}
           className="mt-0.5 h-[18px] w-[18px] accent-[#3260ff]"
         />
         <span>
@@ -238,6 +303,8 @@ export default function SignupForm() {
           .
         </span>
       </label>
+
+      {fieldErrors.terms ? <p className="mt-[-8px] text-sm font-semibold text-rose-600">{fieldErrors.terms}</p> : null}
 
       {submitError ? (
         <p
@@ -260,9 +327,9 @@ export default function SignupForm() {
       <button
         type="submit"
         className="min-h-[58px] rounded-xl border-0 bg-linear-to-r from-[#2659ff] via-[#3467ff] to-[#2554f6] text-[1.05rem] font-bold text-white shadow-[0_16px_26px_rgba(47,87,255,0.28)] transition duration-150 hover:enabled:-translate-y-px hover:enabled:shadow-[0_20px_30px_rgba(47,87,255,0.32)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(61,104,255,0.28)] active:enabled:translate-y-0 active:enabled:shadow-[0_12px_22px_rgba(47,87,255,0.24)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
-        disabled={!acceptedTerms || isSubmitting}
+        disabled={isSubmitting}
       >
-        {isSubmitting ? 'Signing Up...' : 'Sign Up'}
+        {isSubmitting ? 'Creating Account...' : 'Sign Up'}
       </button>
 
       <div className="flex items-center gap-3.5 text-[0.95rem] text-slate-400" aria-hidden="true">

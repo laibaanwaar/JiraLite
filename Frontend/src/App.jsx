@@ -1,38 +1,36 @@
 import { useEffect, useState } from 'react'
-import AdminDashboardPage from './pages/dashboard/AdminDashboardPage.jsx'
+import { AdminRoute, ProtectedRoute, PublicOnlyRoute, StrictAdminRoute } from './components/routes/ProtectedRoute.jsx'
+import useAuth from './hooks/useAuth.js'
 import LoginPage from './pages/LoginPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import ProjectInvitationResponsePage from './pages/ProjectInvitationResponsePage.jsx'
 import ResendVerificationPage from './pages/ResendVerificationPage.jsx'
+import SignupPage from './pages/SignupPage.jsx'
 import TaskCommentsPage from './pages/TaskCommentsPage.jsx'
+import VerifyEmailPage from './pages/VerifyEmailPage.jsx'
+import DashboardPage from './pages/dashboard/DashboardPage.jsx'
 import CreateProjectPage from './pages/projects/CreateProjectPage.jsx'
 import ProjectDetailPage from './pages/projects/ProjectDetailPage.jsx'
+import ProjectTasksPage from './pages/projects/ProjectTasksPage.jsx'
 import ProjectsPage from './pages/projects/ProjectsPage.jsx'
-import SignupPage from './pages/SignupPage.jsx'
 import CreateTaskPage from './pages/tasks/CreateTaskPage.jsx'
 import EditTaskPage from './pages/tasks/EditTaskPage.jsx'
-import MyTasksPage from './pages/tasks/MyTasksPage.jsx'
 import TaskDetailPage from './pages/tasks/TaskDetailPage.jsx'
 import TasksPage from './pages/tasks/TasksPage.jsx'
-import VerifyEmailPage from './pages/VerifyEmailPage.jsx'
-import { getAccessToken } from './services/authService.js'
+import { navigateTo } from './utils/navigation.js'
 
-const PROTECTED_PATHS = ['/profile', '/projects', '/projects/create', '/dashboard']
-
-function isProtectedPath(pathname) {
-  return (
-    PROTECTED_PATHS.includes(pathname) ||
-    pathname === '/tasks' ||
-    pathname.startsWith('/tasks/')
-  )
-}
-
-function usePathname() {
-  const [pathname, setPathname] = useState(window.location.pathname)
+function useLocationState() {
+  const [locationState, setLocationState] = useState({
+    pathname: window.location.pathname,
+    search: window.location.search,
+  })
 
   useEffect(() => {
     const handlePopState = () => {
-      setPathname(window.location.pathname)
+      setLocationState({
+        pathname: window.location.pathname,
+        search: window.location.search,
+      })
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -42,36 +40,37 @@ function usePathname() {
     }
   }, [])
 
-  return pathname
+  return locationState
 }
 
 export default function App() {
-  const pathname = usePathname()
-  const isAuthenticated = Boolean(getAccessToken())
+  const { dashboardPath, isAuthenticated } = useAuth()
+  const { pathname } = useLocationState()
+  const projectTasksMatch = pathname.match(/^\/projects\/(\d+)\/tasks$/)
   const projectDetailMatch = pathname.match(/^\/projects\/(\d+)$/)
+  const taskCommentsMatch = pathname.match(/^\/tasks\/(\d+)\/comments$/)
   const taskDetailMatch = pathname.match(/^\/tasks\/(\d+)$/)
   const taskEditMatch = pathname.match(/^\/tasks\/(\d+)\/edit$/)
 
-  useEffect(() => {
-    if (!isProtectedPath(pathname) || isAuthenticated) {
-      return
+  if (pathname === '/' || pathname === '/signup') {
+    if (isAuthenticated && pathname === '/') {
+      navigateTo(dashboardPath, { replace: true })
+      return null
     }
 
-    window.history.replaceState(
-      {
-        authNotice: {
-          message: 'Please log in to continue.',
-          type: 'warning',
-        },
-      },
-      '',
-      '/login',
+    return (
+      <PublicOnlyRoute>
+        <SignupPage />
+      </PublicOnlyRoute>
     )
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, [isAuthenticated, pathname])
+  }
 
   if (pathname === '/login') {
-    return <LoginPage />
+    return (
+      <PublicOnlyRoute>
+        <LoginPage />
+      </PublicOnlyRoute>
+    )
   }
 
   if (pathname === '/verify-email') {
@@ -82,57 +81,129 @@ export default function App() {
     return <ResendVerificationPage />
   }
 
-  if (pathname === '/project-invitations/respond') {
+  if (pathname === '/project-invitations/respond' || pathname === '/invitations/accept') {
     return <ProjectInvitationResponsePage />
   }
 
-  if (pathname === '/profile') {
-    return isAuthenticated ? <ProfilePage /> : <LoginPage />
+  if (pathname === '/dashboard') {
+    return (
+      <ProtectedRoute>
+        <DashboardPage />
+      </ProtectedRoute>
+    )
   }
 
-  if (pathname === '/dashboard') {
-    return isAuthenticated ? <AdminDashboardPage /> : <LoginPage />
+  if (pathname === '/admin/dashboard') {
+    navigateTo('/dashboard', { replace: true })
+    return null
+  }
+
+  if (pathname === '/member/dashboard') {
+    navigateTo('/dashboard', { replace: true })
+    return null
+  }
+
+  if (pathname === '/profile') {
+    return (
+      <ProtectedRoute>
+        <ProfilePage />
+      </ProtectedRoute>
+    )
   }
 
   if (pathname === '/projects') {
-    return isAuthenticated ? <ProjectsPage /> : <LoginPage />
+    return (
+      <ProtectedRoute>
+        <ProjectsPage />
+      </ProtectedRoute>
+    )
   }
 
   if (pathname === '/projects/create') {
-    return isAuthenticated ? <CreateProjectPage /> : <LoginPage />
+    return (
+      <AdminRoute>
+        <CreateProjectPage />
+      </AdminRoute>
+    )
+  }
+
+  if (projectTasksMatch) {
+    return (
+      <ProtectedRoute>
+        <ProjectTasksPage projectId={projectTasksMatch[1]} />
+      </ProtectedRoute>
+    )
   }
 
   if (projectDetailMatch) {
-    return isAuthenticated ? <ProjectDetailPage projectId={projectDetailMatch[1]} /> : <LoginPage />
+    return (
+      <ProtectedRoute>
+        <ProjectDetailPage projectId={projectDetailMatch[1]} />
+      </ProtectedRoute>
+    )
   }
 
   if (pathname === '/task-comment') {
-    return isAuthenticated ? <TaskCommentsPage /> : <LoginPage />
+    return (
+      <ProtectedRoute>
+        <TaskCommentsPage />
+      </ProtectedRoute>
+    )
   }
 
   if (pathname === '/tasks') {
-    return isAuthenticated ? <TasksPage /> : <LoginPage />
+    return (
+      <StrictAdminRoute>
+        <TasksPage />
+      </StrictAdminRoute>
+    )
   }
 
   if (pathname === '/tasks/my') {
-    return isAuthenticated ? <MyTasksPage /> : <LoginPage />
+    navigateTo('/tasks', { replace: true })
+    return null
   }
 
   if (pathname === '/tasks/create') {
-    return isAuthenticated ? <CreateTaskPage /> : <LoginPage />
+    return (
+      <AdminRoute>
+        <CreateTaskPage />
+      </AdminRoute>
+    )
   }
 
   if (taskEditMatch) {
-    return isAuthenticated ? <EditTaskPage taskId={taskEditMatch[1]} /> : <LoginPage />
+    return (
+      <ProtectedRoute>
+        <EditTaskPage taskId={taskEditMatch[1]} />
+      </ProtectedRoute>
+    )
+  }
+
+  if (taskCommentsMatch) {
+    return (
+      <ProtectedRoute>
+        <TaskCommentsPage taskId={taskCommentsMatch[1]} />
+      </ProtectedRoute>
+    )
   }
 
   if (taskDetailMatch) {
-    return isAuthenticated ? <TaskDetailPage taskId={taskDetailMatch[1]} /> : <LoginPage />
+    return (
+      <ProtectedRoute>
+        <TaskDetailPage taskId={taskDetailMatch[1]} />
+      </ProtectedRoute>
+    )
   }
 
   if (isAuthenticated) {
-    return <ProfilePage />
+    navigateTo(dashboardPath, { replace: true })
+    return null
   }
 
-  return <SignupPage />
+  return (
+    <PublicOnlyRoute>
+      <SignupPage />
+    </PublicOnlyRoute>
+  )
 }

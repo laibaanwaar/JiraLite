@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { getProjects } from '../services/projectService.js'
 import { getMyTasks, getProjectTasks, getTasks, normalizeTaskError } from '../services/taskService.js'
 
 function redirectToLogin(message) {
@@ -15,12 +16,82 @@ function redirectToLogin(message) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+function compareValues(firstValue, secondValue) {
+  if (!firstValue && !secondValue) {
+    return 0
+  }
+
+  if (!firstValue) {
+    return 1
+  }
+
+  if (!secondValue) {
+    return -1
+  }
+
+  return String(firstValue).localeCompare(String(secondValue))
+}
+
+function sortTasks(tasks, ordering = '-created_at') {
+  const descending = ordering.startsWith('-')
+  const fieldName = descending ? ordering.slice(1) : ordering
+
+  return [...tasks].sort((firstTask, secondTask) => {
+    const comparison = compareValues(firstTask?.[fieldName], secondTask?.[fieldName])
+    return descending ? comparison * -1 : comparison
+  })
+}
+
+async function getAllAccessibleProjects(signal) {
+  const pageSize = 50
+  let page = 1
+  let projects = []
+  let totalCount = 0
+
+  do {
+    const response = await getProjects({ page, page_size: pageSize }, undefined, { signal })
+    totalCount = response.count
+    projects = [...projects, ...response.results]
+    page += 1
+  } while (projects.length < totalCount)
+
+  return projects
+}
+
+async function getAllProjectTasks(projectId, params, signal) {
+  const pageSize = 100
+  let page = 1
+  let tasks = []
+  let totalCount = 0
+
+  do {
+    const response = await getProjectTasks(
+      projectId,
+      {
+        ...params,
+        page,
+        page_size: pageSize,
+      },
+      { signal },
+    )
+
+    totalCount = response.count
+    tasks = [...tasks, ...response.results]
+    page += 1
+  } while (tasks.length < totalCount)
+
+  return tasks
+}
+
 export default function useTasks({ mode = 'all', projectId = '', filters = {}, page = 1, pageSize = 10 }) {
   const [tasks, setTasks] = useState([])
   const [count, setCount] = useState(0)
+  const [next, setNext] = useState(null)
+  const [previous, setPrevious] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
   const [serverMessage, setServerMessage] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
   const requestIdRef = useRef(0)
 
   useEffect(() => {
@@ -34,17 +105,39 @@ export default function useTasks({ mode = 'all', projectId = '', filters = {}, p
       project_id: filters.project_id,
       status: filters.status,
       priority: filters.priority,
-      search: filters.search,
+      search: filters.search?.trim(),
       ordering: filters.ordering,
-      ...(page > 1 ? { page } : {}),
+      page,
+      page_size: pageSize,
     }
 
     const request =
       mode === 'mine'
         ? getMyTasks(params, { signal: controller.signal })
-        : mode === 'project'
-          ? getProjectTasks(projectId, params, { signal: controller.signal })
-          : getTasks(params, { signal: controller.signal })
+        : mode === 'project' || filters.project_id
+          ? getProjectTasks(projectId || filters.project_id, params, { signal: controller.signal })
+          : getAllAccessibleProjects(controller.signal).then(async (projects) => {
+              const projectTasks = await Promise.all(
+                projects.map((project) => getAllProjectTasks(project.id, params, controller.signal)),
+              )
+              const allTasks = sortTasks(projectTasks.flat(), filters.ordering || '-created_at')
+              const startIndex = (page - 1) * pageSize
+              const results = allTasks.slice(startIndex, startIndex + pageSize)
+
+              return {
+                count: allTasks.length,
+                message: '',
+                next: startIndex + pageSize < allTasks.length ? 'next' : null,
+                previous: page > 1 ? 'previous' : null,
+                results,
+              }
+            }).catch((error) => {
+              if (error?.response?.status === 403 || error?.response?.status === 404) {
+                return getTasks(params, { signal: controller.signal })
+              }
+
+              throw error
+            })
 
     request
       .then((response) => {
@@ -54,6 +147,8 @@ export default function useTasks({ mode = 'all', projectId = '', filters = {}, p
 
         setTasks(response.results)
         setCount(response.count)
+        setNext(response.next)
+        setPrevious(response.previous)
         setServerMessage(response.message || '')
       })
       .catch((error) => {
@@ -70,6 +165,8 @@ export default function useTasks({ mode = 'all', projectId = '', filters = {}, p
 
         setTasks([])
         setCount(0)
+        setNext(null)
+        setPrevious(null)
         setErrorMessage(
           normalized.message || (error?.request ? 'Unable to load tasks. Check your connection and try again.' : 'Unable to load tasks.'),
         )
@@ -83,13 +180,19 @@ export default function useTasks({ mode = 'all', projectId = '', filters = {}, p
     return () => {
       controller.abort()
     }
-  }, [filters.ordering, filters.priority, filters.project_id, filters.search, filters.status, mode, page, pageSize, projectId])
+  }, [filters.ordering, filters.priority, filters.project_id, filters.search, filters.status, mode, page, pageSize, projectId, refreshKey])
+
+  const totalPages = Math.max(1, Math.ceil(count / pageSize))
 
   return {
     count,
     errorMessage,
     isLoading,
+    next,
+    previous,
+    refetch: () => setRefreshKey((value) => value + 1),
     serverMessage,
     tasks,
+    totalPages,
   }
 }
