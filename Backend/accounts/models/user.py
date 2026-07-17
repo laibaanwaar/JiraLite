@@ -4,12 +4,20 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 
 from accounts.managers import UserManager
+from accounts.models.role import Role
 
 
 class User(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
     email = models.EmailField(unique=True)
+    role = models.ForeignKey(
+        Role,
+        on_delete=models.PROTECT,
+        related_name="users",
+        null=True,
+        blank=True,
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)

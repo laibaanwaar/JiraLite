@@ -2,6 +2,8 @@ import re
 
 from rest_framework import serializers
 
+from accounts.services.user_payload_service import build_role_payload
+
 
 PHONE_PATTERN = re.compile(r"^[0-9+\-() ]+$")
 ALLOWED_UPDATE_FIELDS = {"first_name", "last_name", "phone", "bio", "profile_image"}
@@ -121,6 +123,7 @@ class ProfileSerializer(serializers.Serializer):
             "email": user.email,
             "is_email_verified": user.is_email_verified,
             "is_active": user.is_active,
+            "role": build_role_payload(getattr(user, "role", None)),
             "profile": {
                 "id": profile.id,
                 "profile_image": image_url,

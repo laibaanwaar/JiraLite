@@ -23,6 +23,7 @@ from accounts.services.exceptions import (
     TokenOwnershipError,
 )
 from accounts.services.rate_limit_service import RateLimitService
+from accounts.services.user_payload_service import build_user_payload, get_role_by_code
 
 
 logger = logging.getLogger(__name__)
@@ -88,11 +89,13 @@ class AuthService:
         now = timezone.now()
 
         with cast(Any, transaction).atomic():
+            admin_role = get_role_by_code(code="ADMIN")
             user = cast(Any, User.objects).create_user(
                 first_name=first_name.strip(),
                 last_name=last_name.strip(),
                 email=normalized_email,
                 password=password,
+                role=admin_role,
                 is_email_verified=False,
                 is_active=True,
             )
@@ -117,6 +120,7 @@ class AuthService:
             "data": {
                 "email": user.email,
                 "is_email_verified": user.is_email_verified,
+                "role": build_user_payload(user)["role"],
             },
         }
 
@@ -159,14 +163,7 @@ class AuthService:
                 "refresh": str(refresh),
                 "access_expires_in": 1800,
                 "session_expires_in": 86400,
-                "user": {
-                    "id": user.id,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "email": user.email,
-                    "is_email_verified": user.is_email_verified,
-                    "is_active": user.is_active,
-                },
+                "user": build_user_payload(user),
             },
         }
 

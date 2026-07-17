@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from accounts.models import UserProfile
 from projects.models import Project, ProjectInvitation, ProjectMember, Task
 from projects.services.email_service import ProjectInvitationEmailService
 
@@ -29,6 +30,7 @@ class ProjectApiTests(APITestCase):
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
         self.create_url = reverse("project-create")
+        self.my_projects_url = reverse("my-project-list")
         self.preview_url = reverse("project-invitation-preview")
         self.accept_url = reverse("project-invitation-accept")
         self.reject_url = reverse("project-invitation-reject")
@@ -379,6 +381,558 @@ class ProjectApiTests(APITestCase):
             ).exists()
         )
 
+    def test_project_admin_can_send_invitation_via_new_endpoint(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+
+        with patch("projects.services.email_service.send_mail", return_value=1):
+            response = self.client.post(
+                reverse("project-invitation-create", kwargs={"project_id": project.id}),
+                {"email": "member@example.com", "project_role": ProjectMember.ROLE_MEMBER},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["invited_email"], "member@example.com")
+        self.assertEqual(response.data["data"]["project_role"], ProjectMember.ROLE_MEMBER)
+        self.assertTrue(
+            ProjectInvitation.objects.filter(
+                project=project,
+                invited_email="member@example.com",
+                status=ProjectInvitation.STATUS_PENDING,
+            ).exists()
+        )
+
+    def test_project_admin_can_invite_any_valid_non_member_email(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        User.objects.create_user(
+            first_name="Existing",
+            last_name="User",
+            email="existing-valid@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+
+        with patch("projects.services.email_service.send_mail", return_value=1):
+            response = self.client.post(
+                reverse("project-invitation-create", kwargs={"project_id": project.id}),
+                {"email": " Existing-Valid@Example.com "},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["invited_email"], "existing-valid@example.com")
+
+    def test_member_cannot_send_invitation_via_new_endpoint(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        member_user = User.objects.create_user(
+            first_name="Member",
+            last_name="Only",
+            email="member-only@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        ProjectMember.objects.create(project=project, user=member_user, role=ProjectMember.ROLE_MEMBER)
+        member_refresh = RefreshToken.for_user(member_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(member_refresh.access_token)}")
+
+        response = self.client.post(
+            reverse("project-invitation-create", kwargs={"project_id": project.id}),
+            {"email": "newmember@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_duplicate_pending_invitation_is_rejected_on_new_endpoint(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="duplicate@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(ProjectInvitationEmailService.generate_token()),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.post(
+            reverse("project-invitation-create", kwargs={"project_id": project.id}),
+            {"email": "duplicate@example.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["errors"]["email"], ["A pending invitation already exists for this email."])
+
+    def test_invitation_detail_endpoint_returns_account_state(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="detail@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.get(reverse("invitation-detail", kwargs={"token": token}))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["email"], "detail@example.com")
+        self.assertFalse(response.data["data"]["account_exists"])
+        self.assertFalse(response.data["data"]["expired"])
+
+    def test_invitation_detail_returns_account_exists_true_for_exact_invited_email(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        User.objects.create_user(
+            first_name="Detail",
+            last_name="User",
+            email="detail-existing@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        User.objects.create_user(
+            first_name="Partial",
+            last_name="User",
+            email="xdetail-existing@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="DETAIL-EXISTING@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.get(reverse("invitation-detail", kwargs={"token": token}))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["invited_email"], "detail-existing@example.com")
+        self.assertTrue(response.data["data"]["account_exists"])
+        self.assertTrue(response.data["data"]["show_name_password_form"])
+        self.assertEqual(response.data["data"]["inviter"]["name"], "Sara Ahmed")
+
+    def test_invitation_detail_returns_account_exists_false_for_inactive_invited_email(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        User.objects.create_user(
+            first_name="Inactive",
+            last_name="User",
+            email="inactive-invited@example.com",
+            password="UserPassword@123",
+            is_email_verified=False,
+            is_active=False,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="inactive-invited@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.get(reverse("invitation-detail", kwargs={"token": token}))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["data"]["account_exists"])
+
+    def test_invitation_detail_ignores_different_logged_in_account(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        other_user = User.objects.create_user(
+            first_name="Other",
+            last_name="User",
+            email="other-detail@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="new-detail@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        other_refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(other_refresh.access_token)}")
+
+        response = self.client.get(reverse("invitation-detail", kwargs={"token": token}))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["invited_email"], "new-detail@example.com")
+        self.assertFalse(response.data["data"]["account_exists"])
+
+    def test_invitation_detail_rejects_non_pending_invitation(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="accepted-detail@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            status=ProjectInvitation.STATUS_ACCEPTED,
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.get(reverse("invitation-detail", kwargs={"token": token}))
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["message"], "This invitation is no longer pending.")
+
+    def test_new_user_can_accept_invitation_and_is_created_as_member(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        token = ProjectInvitationEmailService.generate_token()
+        invitation = ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="invited-new@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.post(
+            reverse("invitation-accept", kwargs={"token": token}),
+            {
+                "first_name": "Ali",
+                "last_name": "Khan",
+                "password": "StrongPassword123!",
+                "confirm_password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invited_user = User.objects.get(email="invited-new@example.com")
+        self.assertEqual(invited_user.role.code, "MEMBER")
+        self.assertTrue(invited_user.check_password("StrongPassword123!"))
+        self.assertNotEqual(invited_user.password, "StrongPassword123!")
+        self.assertTrue(UserProfile.objects.filter(user=invited_user).exists())
+        self.assertIn("access", response.data["data"])
+        self.assertIn("refresh", response.data["data"])
+        self.assertEqual(response.data["data"]["user"]["email"], invited_user.email)
+        self.assertEqual(response.data["data"]["user"]["role"]["code"], "MEMBER")
+        self.assertTrue(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
+
+    def test_inactive_invited_user_can_set_password_and_is_activated_as_member(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        inactive_user = User.objects.create_user(
+            first_name="Old",
+            last_name="Name",
+            email="activate-me@example.com",
+            password="OldPassword123!",
+            is_email_verified=False,
+            is_active=False,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        invitation = ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="activate-me@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        user_count_before = User.objects.count()
+
+        response = self.client.post(
+            reverse("invitation-accept", kwargs={"token": token}),
+            {
+                "first_name": "New",
+                "last_name": "Member",
+                "password": "StrongPassword123!",
+                "confirm_password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        inactive_user.refresh_from_db()
+        self.assertEqual(User.objects.count(), user_count_before)
+        self.assertTrue(inactive_user.is_active)
+        self.assertTrue(inactive_user.is_email_verified)
+        self.assertEqual(inactive_user.role.code, "MEMBER")
+        self.assertTrue(inactive_user.check_password("StrongPassword123!"))
+        self.assertIn("access", response.data["data"])
+        self.assertIn("refresh", response.data["data"])
+        self.assertTrue(ProjectMember.objects.filter(project=project, user=inactive_user).exists())
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
+
+    def test_new_invited_user_can_create_account_while_another_account_is_logged_in(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        other_user = User.objects.create_user(
+            first_name="Other",
+            last_name="User",
+            email="other-session@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        invitation = ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="brand-new@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        other_refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(other_refresh.access_token)}")
+
+        response = self.client.post(
+            reverse("invitation-accept", kwargs={"token": token}),
+            {
+                "first_name": "Brand",
+                "last_name": "New",
+                "password": "StrongPassword123!",
+                "confirm_password": "StrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invited_user = User.objects.get(email="brand-new@example.com")
+        self.assertNotEqual(invited_user.id, other_user.id)
+        self.assertIn("access", response.data["data"])
+        self.assertIn("refresh", response.data["data"])
+        self.assertEqual(response.data["data"]["user"]["role"]["code"], "MEMBER")
+        self.assertTrue(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
+
+    def test_existing_active_invited_user_accept_overwrites_password_and_role(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        invited_user = User.objects.create_user(
+            first_name="Invited",
+            last_name="User",
+            email="existing-invite@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        admin_role = invited_user.role
+        other_user = User.objects.create_user(
+            first_name="Other",
+            last_name="User",
+            email="other-existing@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email=invited_user.email,
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        other_refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(other_refresh.access_token)}")
+        user_count_before = User.objects.count()
+        original_password_hash = invited_user.password
+
+        response = self.client.post(
+            reverse("invitation-accept", kwargs={"token": token}),
+            {
+                "first_name": "Ignored",
+                "last_name": "Name",
+                "password": "NewStrongPassword123!",
+                "confirm_password": "NewStrongPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invited_user.refresh_from_db()
+        self.assertEqual(User.objects.count(), user_count_before)
+        self.assertNotEqual(invited_user.password, original_password_hash)
+        self.assertTrue(invited_user.check_password("NewStrongPassword123!"))
+        self.assertEqual(invited_user.role.code, "MEMBER")
+        self.assertNotEqual(invited_user.role_id, admin_role.id)
+        self.assertEqual(invited_user.first_name, "Ignored")
+        self.assertEqual(invited_user.last_name, "Name")
+        self.assertTrue(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        self.assertIn("access", response.data["data"])
+        self.assertIn("refresh", response.data["data"])
+
+    def test_existing_active_invited_user_can_set_new_password_from_invitation(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        invited_user = User.objects.create_user(
+            first_name="Invited",
+            last_name="User",
+            email="login-required@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email=invited_user.email,
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        self.client.credentials()
+        user_count_before = User.objects.count()
+
+        response = self.client.post(
+            reverse("invitation-accept", kwargs={"token": token}),
+            {
+                "first_name": "Invited",
+                "last_name": "User",
+                "password": "ReplacementPassword123!",
+                "confirm_password": "ReplacementPassword123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invited_user.refresh_from_db()
+        self.assertEqual(User.objects.count(), user_count_before)
+        self.assertTrue(invited_user.check_password("ReplacementPassword123!"))
+        self.assertEqual(invited_user.role.code, "MEMBER")
+        self.assertTrue(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        self.assertIn("access", response.data["data"])
+        self.assertIn("refresh", response.data["data"])
+
+    def test_existing_user_accept_email_comparison_is_case_insensitive(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        invited_user = User.objects.create_user(
+            first_name="Invited",
+            last_name="User",
+            email="case-invite@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        token = ProjectInvitationEmailService.generate_token()
+        invitation = ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="CASE-INVITE@EXAMPLE.COM",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        invited_refresh = RefreshToken.for_user(invited_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(invited_refresh.access_token)}")
+        user_count_before = User.objects.count()
+
+        response = self.client.post(
+            reverse("invitation-accept", kwargs={"token": token}),
+            {
+                "first_name": "Ignored",
+                "last_name": "Name",
+                "password": "CaseReplacement123!",
+                "confirm_password": "CaseReplacement123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invited_user.refresh_from_db()
+        self.assertEqual(User.objects.count(), user_count_before)
+        self.assertTrue(invited_user.check_password("CaseReplacement123!"))
+        self.assertEqual(invited_user.role.code, "MEMBER")
+        self.assertIn("access", response.data["data"])
+        self.assertIn("refresh", response.data["data"])
+        self.assertTrue(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
+
+    def test_accepted_invitation_token_cannot_be_reused(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        token = ProjectInvitationEmailService.generate_token()
+        invitation = ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="reuse-check@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+        payload = {
+            "first_name": "Reuse",
+            "last_name": "Check",
+            "password": "StrongPassword123!",
+            "confirm_password": "StrongPassword123!",
+        }
+
+        first_response = self.client.post(reverse("invitation-accept", kwargs={"token": token}), payload, format="json")
+        second_response = self.client.post(reverse("invitation-accept", kwargs={"token": token}), payload, format="json")
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(second_response.data["message"], "This invitation is no longer pending.")
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
+        self.assertEqual(ProjectMember.objects.filter(project=project, user__email="reuse-check@example.com").count(), 1)
+
+    def test_public_reject_endpoint_marks_invitation_rejected(self):
+        project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+        token = ProjectInvitationEmailService.generate_token()
+        invitation = ProjectInvitation.objects.create(
+            project=project,
+            invited_by=self.user,
+            invited_email="reject-public@example.com",
+            project_role=ProjectMember.ROLE_MEMBER,
+            token_hash=ProjectInvitationEmailService.hash_token(token),
+            expires_at=ProjectInvitationEmailService.get_expiry(),
+        )
+
+        response = self.client.post(reverse("invitation-reject", kwargs={"token": token}), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_REJECTED)
+        self.assertIsNotNone(invitation.rejected_at)
+
+    def test_my_projects_alias_returns_member_projects(self):
+        project = Project.objects.create(name="Alias Project", description="", created_by=self.user)
+        ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
+
+        response = self.client.get(self.my_projects_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["count"], 1)
+
     def test_accept_invitation_success(self):
         project = Project.objects.create(name="Invite Project", description="", created_by=self.user)
         ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
@@ -472,7 +1026,7 @@ class ProjectApiTests(APITestCase):
         self.assertEqual(invitation.status, ProjectInvitation.STATUS_REJECTED)
         self.assertFalse(ProjectMember.objects.filter(project=project, user=invited_user).exists())
 
-    def test_invitation_response_page_accepts_invitation_end_to_end(self):
+    def test_invitation_response_page_accept_does_not_bypass_api_accept_flow(self):
         project = Project.objects.create(name="Invite Project", description="Backend work", created_by=self.user)
         ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
         invited_user = User.objects.create_user(
@@ -506,13 +1060,12 @@ class ProjectApiTests(APITestCase):
 
         self.assertEqual(accept_response.status_code, status.HTTP_200_OK)
         invitation.refresh_from_db()
-        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
-        self.assertTrue(ProjectMember.objects.filter(project=project, user=invited_user).exists())
-        self.assertContains(accept_response, "You are now part of the project.")
-        self.assertNotContains(accept_response, "Accept Invitation")
-        self.assertNotContains(accept_response, "Project Description")
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_PENDING)
+        self.assertFalse(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        self.assertContains(accept_response, "Invitation action could not be completed.")
+        self.assertContains(accept_response, "Accept Invitation")
 
-    def test_invitation_response_page_accept_is_idempotent_after_success(self):
+    def test_invitation_response_page_accept_remains_pending_after_repeated_submit(self):
         project = Project.objects.create(name="Invite Project", description="Backend work", created_by=self.user)
         ProjectMember.objects.create(project=project, user=self.user, role=ProjectMember.ROLE_OWNER)
         invited_user = User.objects.create_user(
@@ -548,12 +1101,10 @@ class ProjectApiTests(APITestCase):
         self.assertEqual(first_response.status_code, status.HTTP_200_OK)
         self.assertEqual(second_response.status_code, status.HTTP_200_OK)
         invitation.refresh_from_db()
-        self.assertEqual(invitation.status, ProjectInvitation.STATUS_ACCEPTED)
-        self.assertContains(second_response, "You are now part of the project.")
-        self.assertNotContains(second_response, "Accept Invitation")
-        self.assertNotContains(second_response, "Project Description")
-        self.assertNotContains(second_response, "Invitation action could not be completed.")
-        self.assertNotContains(second_response, "This invitation has already been accepted.")
+        self.assertEqual(invitation.status, ProjectInvitation.STATUS_PENDING)
+        self.assertFalse(ProjectMember.objects.filter(project=project, user=invited_user).exists())
+        self.assertContains(second_response, "Invitation action could not be completed.")
+        self.assertContains(second_response, "Accept Invitation")
 
     def test_invitation_response_page_rejects_invitation_end_to_end(self):
         project = Project.objects.create(name="Invite Project", description="", created_by=self.user)

@@ -39,6 +39,11 @@ class TaskDetailView(APIView):
                 {"success": False, "message": "Task not found.", "errors": {}},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except TaskPermissionError:
+            return Response(
+                {"success": False, "message": "You do not have permission to access this task.", "errors": {}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         except DatabaseError:
             logger.exception("Database error while retrieving task.")
         except Exception:

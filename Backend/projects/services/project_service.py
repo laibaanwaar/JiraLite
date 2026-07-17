@@ -8,8 +8,11 @@ from django.core.validators import validate_email
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
 
+from accounts.models import UserProfile
 from accounts.services.exceptions import EmailDeliveryError
+from accounts.services.user_payload_service import build_user_payload, get_role_by_code
 from projects.models import Project, ProjectInvitation, ProjectMember
 from projects.services.email_service import ProjectInvitationEmailService
 
@@ -122,14 +125,41 @@ class ProjectService:
             raise ValidationError({"token": ["Invalid invitation token."]}) from exc
 
     @staticmethod
-    def _build_invitation_preview_payload(*, invitation: ProjectInvitation, token: str) -> dict:
+    def _get_invitation_for_update(*, token: str) -> ProjectInvitation:
+        token_hash = ProjectInvitationEmailService.hash_token(token.strip())
+        try:
+            return (
+                cast(Any, ProjectInvitation.objects)
+                .select_for_update()
+                .select_related("project", "invited_by")
+                .get(token_hash=token_hash)
+            )
+        except ProjectInvitation.DoesNotExist as exc:
+            raise ValidationError({"token": ["Invalid invitation token."]}) from exc
+
+    @staticmethod
+    def _mark_invitation_expired_if_needed(*, invitation: ProjectInvitation) -> None:
+        if invitation.status == ProjectInvitation.STATUS_PENDING and invitation.expires_at <= timezone.now():
+            invitation.status = ProjectInvitation.STATUS_EXPIRED
+            invitation.save(update_fields=["status", "updated_at"])
+
+    @staticmethod
+    def _validate_pending_invitation(*, invitation: ProjectInvitation) -> None:
+        if not invitation.project.is_active:
+            raise ValidationError({"token": ["This invitation is no longer available."]})
+
+        ProjectService._mark_invitation_expired_if_needed(invitation=invitation)
+
+        if invitation.status != ProjectInvitation.STATUS_PENDING:
+            raise ValidationError({"token": ["This invitation is no longer pending."]})
+
+    @staticmethod
+    def _build_invitation_preview_payload(*, invitation: ProjectInvitation) -> dict:
         if not invitation.project.is_active:
             raise ValidationError({"token": ["This invitation is no longer available."]})
 
         status_message = None
-        if invitation.status == ProjectInvitation.STATUS_PENDING and invitation.expires_at <= timezone.now():
-            invitation.status = ProjectInvitation.STATUS_EXPIRED
-            invitation.save(update_fields=["status", "updated_at"])
+        ProjectService._mark_invitation_expired_if_needed(invitation=invitation)
 
         if invitation.status == ProjectInvitation.STATUS_EXPIRED:
             status_message = "This invitation has expired."
@@ -140,14 +170,24 @@ class ProjectService:
         elif invitation.status == ProjectInvitation.STATUS_CANCELLED:
             status_message = "This invitation has been cancelled."
 
-        invited_user = User.objects.filter(email__iexact=invitation.invited_email).first()
-        has_active_account = bool(invited_user and invited_user.is_active)
+        normalized_invited_email = invitation.invited_email.strip().lower()
+        account_exists = User.objects.filter(
+            email__iexact=invitation.invited_email.strip(),
+            is_active=True,
+        ).exists()
+
+        logger.debug(
+            "Invitation preview: invited_email=%s account_exists=%s status=%s",
+            normalized_invited_email,
+            account_exists,
+            invitation.status,
+        )
 
         return {
             "success": True,
             "message": "Invitation preview retrieved successfully.",
             "data": {
-                "token": token,
+                "email": normalized_invited_email,
                 "status": invitation.status,
                 "status_message": status_message,
                 "project": {
@@ -155,8 +195,15 @@ class ProjectService:
                     "name": invitation.project.name,
                     "description": invitation.project.description,
                 },
-                "invited_email": invitation.invited_email,
-                "role": invitation.role,
+                "inviter_name": f"{invitation.invited_by.first_name} {invitation.invited_by.last_name}".strip()
+                or invitation.invited_by.email,
+                "inviter": {
+                    "name": f"{invitation.invited_by.first_name} {invitation.invited_by.last_name}".strip()
+                    or invitation.invited_by.email,
+                },
+                "project_role": invitation.project_role,
+                "invited_email": normalized_invited_email,
+                "role": invitation.project_role,
                 "message": invitation.message,
                 "invited_by": {
                     "id": invitation.invited_by.id,
@@ -165,8 +212,11 @@ class ProjectService:
                     "email": invitation.invited_by.email,
                 },
                 "expires_at": invitation.expires_at,
-                "has_active_account": has_active_account,
-                "can_accept": invitation.status == ProjectInvitation.STATUS_PENDING and has_active_account,
+                "expired": invitation.status == ProjectInvitation.STATUS_EXPIRED,
+                "account_exists": account_exists,
+                "has_active_account": account_exists,
+                "show_name_password_form": invitation.status == ProjectInvitation.STATUS_PENDING,
+                "can_accept": invitation.status == ProjectInvitation.STATUS_PENDING,
                 "can_reject": invitation.status == ProjectInvitation.STATUS_PENDING,
             },
         }
@@ -174,15 +224,31 @@ class ProjectService:
     @staticmethod
     def get_invitation_preview_by_token(*, token: str) -> dict:
         invitation = ProjectService._get_invitation_by_token(token=token)
-        return ProjectService._build_invitation_preview_payload(invitation=invitation, token=token.strip())
+        return ProjectService._build_invitation_preview_payload(invitation=invitation)
+
+    @staticmethod
+    def get_pending_invitation_details_by_token(*, token: str) -> dict:
+        invitation = ProjectService._get_invitation_by_token(token=token)
+        ProjectService._validate_pending_invitation(invitation=invitation)
+        return ProjectService._build_invitation_preview_payload(invitation=invitation)
 
     @staticmethod
     def get_invitation_preview(*, user, token: str) -> dict:
         invitation = ProjectService._get_invitation_by_token(token=token)
+        return ProjectService._build_invitation_preview_payload(invitation=invitation)
 
-        if invitation.invited_email != user.email.strip().lower():
-            raise PermissionError("The logged-in email does not match the invited email.")
-        return ProjectService._build_invitation_preview_payload(invitation=invitation, token=token.strip())
+    @staticmethod
+    def _get_project_membership(*, user, project_id: int) -> ProjectMember:
+        try:
+            return ProjectMember.objects.select_related("project").get(
+                project_id=project_id,
+                user=user,
+                project__is_active=True,
+            )
+        except ProjectMember.DoesNotExist as exc:
+            if Project.objects.filter(id=project_id, is_active=True).exists():
+                raise ProjectPermissionError("You are not a member of this project.") from exc
+            raise ProjectNotFoundError("Project not found.") from exc
 
     @staticmethod
     def list_project_members(*, user, project_id: int) -> dict:
@@ -351,7 +417,7 @@ class ProjectService:
                     invited_by=user,
                     invited_email=invited_email,
                     message=(message or "").strip(),
-                    role=ProjectMember.ROLE_MEMBER,
+                    project_role=ProjectMember.ROLE_MEMBER,
                     token_hash=token_hash,
                     status=ProjectInvitation.STATUS_PENDING,
                     email_status=ProjectInvitation.EMAIL_PENDING,
@@ -397,26 +463,101 @@ class ProjectService:
         }
 
     @staticmethod
-    def accept_invitation(*, user, token: str) -> dict:
-        token_hash = ProjectInvitationEmailService.hash_token(token.strip())
+    def create_project_invitation(*, user, project_id: int, email: str, project_role: str | None = None) -> dict:
+        membership = ProjectService._get_project_membership(user=user, project_id=project_id)
+        if membership.role not in ProjectService.ADMIN_ROLES:
+            raise ProjectPermissionError("Only the project owner or admin can send invitations.")
 
+        normalized_email = email.strip().lower()
+        validate_email(normalized_email)
+        if normalized_email == user.email.strip().lower():
+            raise ValidationError({"email": ["You cannot invite yourself to your own project."]})
+
+        normalized_project_role = (project_role or ProjectMember.ROLE_MEMBER).strip().upper()
+        if normalized_project_role not in {ProjectMember.ROLE_ADMIN, ProjectMember.ROLE_MEMBER}:
+            raise ValidationError({"project_role": ["Allowed values are ADMIN and MEMBER."]})
+
+        existing_user = User.objects.filter(email__iexact=normalized_email).first()
+        if existing_user and ProjectMember.objects.filter(project=membership.project, user=existing_user).exists():
+            raise IntegrityError("User is already a project member.")
+
+        now = timezone.now()
         with cast(Any, transaction).atomic():
-            try:
-                invitation = cast(Any, ProjectInvitation.objects).select_for_update().select_related("project").get(
-                    token_hash=token_hash
-                )
-            except ProjectInvitation.DoesNotExist as exc:
-                raise ValidationError({"token": ["Invalid invitation token."]}) from exc
+            cast(Any, ProjectInvitation.objects).select_for_update().filter(
+                project=membership.project,
+                invited_email=normalized_email,
+                status=ProjectInvitation.STATUS_PENDING,
+                expires_at__lte=now,
+            ).update(status=ProjectInvitation.STATUS_EXPIRED, updated_at=now)
 
-            if invitation.status != ProjectInvitation.STATUS_PENDING:
-                raise ValidationError({"token": ["This invitation is no longer pending."]})
+            if ProjectInvitation.objects.filter(
+                project=membership.project,
+                invited_email=normalized_email,
+                status=ProjectInvitation.STATUS_PENDING,
+                expires_at__gt=now,
+            ).exists():
+                raise ValidationError({"email": ["A pending invitation already exists for this email."]})
 
-            if invitation.expires_at <= timezone.now():
-                invitation.status = ProjectInvitation.STATUS_EXPIRED
-                invitation.save(update_fields=["status", "updated_at"])
-                raise ValidationError({"token": ["This invitation has expired."]})
+            raw_token = ProjectInvitationEmailService.generate_token()
+            invitation = ProjectInvitation.objects.create(
+                project=membership.project,
+                invited_by=user,
+                invited_email=normalized_email,
+                project_role=normalized_project_role,
+                token_hash=ProjectInvitationEmailService.hash_token(raw_token),
+                status=ProjectInvitation.STATUS_PENDING,
+                email_status=ProjectInvitation.EMAIL_PENDING,
+                expires_at=ProjectInvitationEmailService.get_expiry(),
+            )
 
-            if invitation.invited_email != user.email.strip().lower():
+        inviter_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        try:
+            ProjectInvitationEmailService.send_invitation_email(
+                invitation=invitation,
+                inviter_name=inviter_name,
+                project_name=membership.project.name,
+                token=raw_token,
+            )
+        except EmailDeliveryError:
+            invitation.email_status = ProjectInvitation.EMAIL_FAILED
+            invitation.save(update_fields=["email_status", "updated_at"])
+            raise
+
+        invitation.email_status = ProjectInvitation.EMAIL_SENT
+        invitation.save(update_fields=["email_status", "updated_at"])
+        return {
+            "success": True,
+            "message": "Invitation sent successfully.",
+            "data": {
+                "id": invitation.id,
+                "project": {
+                    "id": membership.project.id,
+                    "name": membership.project.name,
+                },
+                "invited_email": invitation.invited_email,
+                "project_role": invitation.project_role,
+                "status": invitation.status,
+                "expires_at": invitation.expires_at,
+                "created_at": invitation.created_at,
+            },
+        }
+
+    @staticmethod
+    def accept_invitation(*, user, token: str) -> dict:
+        with cast(Any, transaction).atomic():
+            invitation = ProjectService._get_invitation_for_update(token=token)
+            ProjectService._validate_pending_invitation(invitation=invitation)
+
+            normalized_invited_email = invitation.invited_email.strip().lower()
+            normalized_user_email = user.email.strip().lower()
+            logger.debug(
+                "Invitation accept existing account: invited_email=%s authenticated_user_email=%s status=%s",
+                normalized_invited_email,
+                normalized_user_email,
+                invitation.status,
+            )
+
+            if normalized_invited_email != normalized_user_email:
                 raise PermissionError("The logged-in email does not match the invited email.")
 
             if ProjectMember.objects.filter(project=invitation.project, user=user).exists():
@@ -425,7 +566,7 @@ class ProjectService:
             membership = ProjectMember.objects.create(
                 project=invitation.project,
                 user=user,
-                role=ProjectMember.ROLE_MEMBER,
+                role=invitation.project_role,
             )
             invitation.status = ProjectInvitation.STATUS_ACCEPTED
             invitation.accepted_by = user
@@ -443,29 +584,92 @@ class ProjectService:
 
     @staticmethod
     def accept_invitation_by_token(*, token: str) -> dict:
-        token_hash = ProjectInvitationEmailService.hash_token(token.strip())
+        with cast(Any, transaction).atomic():
+            invitation = ProjectService._get_invitation_for_update(token=token)
+            ProjectService._validate_pending_invitation(invitation=invitation)
+        raise ValidationError(
+            {
+                "invited_email": [
+                    "Accept this invitation from the invitation API so existing users can log in and new users can set a password."
+                ]
+            }
+        )
+
+    @staticmethod
+    def accept_invitation_for_new_user(
+        *,
+        token: str,
+        first_name: str,
+        last_name: str,
+        password: str,
+        confirm_password: str,
+    ) -> dict:
+        from django.contrib.auth.password_validation import validate_password
+
+        if password != confirm_password:
+            raise ValidationError({"confirm_password": ["Passwords do not match."]})
 
         with cast(Any, transaction).atomic():
+            invitation = ProjectService._get_invitation_for_update(token=token)
+            ProjectService._validate_pending_invitation(invitation=invitation)
+
+            normalized_invited_email = invitation.invited_email.strip().lower()
+            invited_user = (
+                cast(Any, User.objects)
+                .select_for_update()
+                .filter(email=normalized_invited_email)
+                .first()
+            )
+            logger.debug(
+                "Invitation accept new account: invited_email=%s account_exists=%s status=%s",
+                normalized_invited_email,
+                invited_user is not None,
+                invitation.status,
+            )
+
+            probe_user = invited_user or User(
+                first_name=first_name.strip(),
+                last_name=last_name.strip(),
+                email=normalized_invited_email,
+            )
             try:
-                invitation = cast(Any, ProjectInvitation.objects).select_for_update().select_related("project").get(
-                    token_hash=token_hash
-                )
-            except ProjectInvitation.DoesNotExist as exc:
-                raise ValidationError({"token": ["Invalid invitation token."]}) from exc
+                validate_password(password, user=probe_user)
+            except ValidationError as exc:
+                raise ValidationError({"password": exc.messages}) from exc
 
-            if invitation.status != ProjectInvitation.STATUS_PENDING:
-                raise ValidationError({"token": ["This invitation is no longer pending."]})
-
-            if invitation.expires_at <= timezone.now():
-                invitation.status = ProjectInvitation.STATUS_EXPIRED
-                invitation.save(update_fields=["status", "updated_at"])
-                raise ValidationError({"token": ["This invitation has expired."]})
-
-            invited_user = User.objects.filter(email__iexact=invitation.invited_email, is_active=True).first()
+            member_role = get_role_by_code(code="MEMBER")
             if invited_user is None:
-                raise ValidationError(
-                    {"invited_email": ["Create or activate an account with this email before accepting the invitation."]}
+                invited_user = cast(Any, User.objects).create_user(
+                    first_name=first_name.strip(),
+                    last_name=last_name.strip(),
+                    email=normalized_invited_email,
+                    password=password,
+                    role=member_role,
+                    is_email_verified=True,
+                    is_active=True,
                 )
+                UserProfile.objects.create(user=invited_user)
+            else:
+                invited_user.first_name = first_name.strip()
+                invited_user.last_name = last_name.strip()
+                invited_user.email = normalized_invited_email
+                invited_user.role = member_role
+                invited_user.is_email_verified = True
+                invited_user.is_active = True
+                invited_user.set_password(password)
+                invited_user.save(
+                    update_fields=[
+                        "first_name",
+                        "last_name",
+                        "email",
+                        "role",
+                        "is_email_verified",
+                        "is_active",
+                        "password",
+                        "updated_at",
+                    ]
+                )
+                UserProfile.objects.get_or_create(user=invited_user)
 
             if ProjectMember.objects.filter(project=invitation.project, user=invited_user).exists():
                 raise IntegrityError("User is already a project member.")
@@ -473,13 +677,14 @@ class ProjectService:
             membership = ProjectMember.objects.create(
                 project=invitation.project,
                 user=invited_user,
-                role=ProjectMember.ROLE_MEMBER,
+                role=invitation.project_role,
             )
             invitation.status = ProjectInvitation.STATUS_ACCEPTED
             invitation.accepted_by = invited_user
             invitation.accepted_at = timezone.now()
             invitation.save(update_fields=["status", "accepted_by", "accepted_at", "updated_at"])
 
+        refresh = RefreshToken.for_user(invited_user)
         return {
             "success": True,
             "message": "Invitation accepted successfully.",
@@ -487,34 +692,23 @@ class ProjectService:
                 "project_id": membership.project_id,
                 "role": membership.role,
                 "email": invited_user.email,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": build_user_payload(invited_user),
             },
         }
 
     @staticmethod
     def reject_invitation(*, user, token: str) -> dict:
-        token_hash = ProjectInvitationEmailService.hash_token(token.strip())
-
         with cast(Any, transaction).atomic():
-            try:
-                invitation = cast(Any, ProjectInvitation.objects).select_for_update().select_related("project").get(
-                    token_hash=token_hash
-                )
-            except ProjectInvitation.DoesNotExist as exc:
-                raise ValidationError({"token": ["Invalid invitation token."]}) from exc
-
-            if invitation.invited_email != user.email.strip().lower():
+            invitation = ProjectService._get_invitation_for_update(token=token)
+            if invitation.invited_email.strip().lower() != user.email.strip().lower():
                 raise PermissionError("The logged-in email does not match the invited email.")
-
-            if invitation.status != ProjectInvitation.STATUS_PENDING:
-                raise ValidationError({"token": ["This invitation is no longer pending."]})
-
-            if invitation.expires_at <= timezone.now():
-                invitation.status = ProjectInvitation.STATUS_EXPIRED
-                invitation.save(update_fields=["status", "updated_at"])
-                raise ValidationError({"token": ["This invitation has expired."]})
+            ProjectService._validate_pending_invitation(invitation=invitation)
 
             invitation.status = ProjectInvitation.STATUS_REJECTED
-            invitation.save(update_fields=["status", "updated_at"])
+            invitation.rejected_at = timezone.now()
+            invitation.save(update_fields=["status", "rejected_at", "updated_at"])
 
         return {
             "success": True,
@@ -527,26 +721,13 @@ class ProjectService:
 
     @staticmethod
     def reject_invitation_by_token(*, token: str) -> dict:
-        token_hash = ProjectInvitationEmailService.hash_token(token.strip())
-
         with cast(Any, transaction).atomic():
-            try:
-                invitation = cast(Any, ProjectInvitation.objects).select_for_update().select_related("project").get(
-                    token_hash=token_hash
-                )
-            except ProjectInvitation.DoesNotExist as exc:
-                raise ValidationError({"token": ["Invalid invitation token."]}) from exc
-
-            if invitation.status != ProjectInvitation.STATUS_PENDING:
-                raise ValidationError({"token": ["This invitation is no longer pending."]})
-
-            if invitation.expires_at <= timezone.now():
-                invitation.status = ProjectInvitation.STATUS_EXPIRED
-                invitation.save(update_fields=["status", "updated_at"])
-                raise ValidationError({"token": ["This invitation has expired."]})
+            invitation = ProjectService._get_invitation_for_update(token=token)
+            ProjectService._validate_pending_invitation(invitation=invitation)
 
             invitation.status = ProjectInvitation.STATUS_REJECTED
-            invitation.save(update_fields=["status", "updated_at"])
+            invitation.rejected_at = timezone.now()
+            invitation.save(update_fields=["status", "rejected_at", "updated_at"])
 
         return {
             "success": True,

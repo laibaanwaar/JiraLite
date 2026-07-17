@@ -4,9 +4,10 @@ from typing import Any, cast
 from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, Paginator
 from django.db import DatabaseError, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 
 from projects.models import Project, ProjectMember, Task
+from projects.permissions import is_account_admin
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class TaskNotFoundError(LookupError):
 
 class TaskService:
     ADMIN_ROLES = {ProjectMember.ROLE_OWNER, ProjectMember.ROLE_ADMIN}
+    EMPTY_FILTER_VALUES = {"", "all", "none", "null", "undefined", "all projects", "all statuses", "all status", "all priority", "all priorities"}
     VALID_ORDERING_FIELDS = {
         "created_at",
         "-created_at",
@@ -45,11 +47,20 @@ class TaskService:
         )
 
     @staticmethod
+    def _with_comment_count(queryset: QuerySet[Task]) -> QuerySet[Task]:
+        return queryset.annotate(comment_count=Count("comments", distinct=True))
+
+    @staticmethod
     def _get_membership(*, user, project: Project) -> ProjectMember:
         try:
             return ProjectMember.objects.select_related("project", "user").get(project=project, user=user)
         except ProjectMember.DoesNotExist as exc:
             raise TaskPermissionError("You are not a member of this project.") from exc
+
+    @staticmethod
+    def _require_account_admin(*, user) -> None:
+        if not is_account_admin(user):
+            raise TaskPermissionError("Permission denied.")
 
     @staticmethod
     def _get_active_project(*, project_id: int) -> Project:
@@ -73,32 +84,41 @@ class TaskService:
         return assignee
 
     @staticmethod
+    def _clean_filter_value(value) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        if cleaned.lower() in TaskService.EMPTY_FILTER_VALUES:
+            return None
+        return cleaned
+
+    @staticmethod
     def _apply_filters(queryset: QuerySet[Task], *, params, allow_project_filter: bool) -> QuerySet[Task]:
-        status_value = params.get("status")
+        status_value = TaskService._clean_filter_value(params.get("status"))
         if status_value:
             queryset = queryset.filter(status=status_value)
 
-        priority_value = params.get("priority")
+        priority_value = TaskService._clean_filter_value(params.get("priority"))
         if priority_value:
             queryset = queryset.filter(priority=priority_value)
 
-        assignee_id = params.get("assignee_id")
+        assignee_id = TaskService._clean_filter_value(params.get("assignee_id"))
         if assignee_id:
             if not str(assignee_id).isdigit():
                 raise ValidationError({"assignee_id": ["assignee_id must be an integer."]})
             queryset = queryset.filter(assignee_id=int(assignee_id))
 
-        project_id = params.get("project_id")
+        project_id = TaskService._clean_filter_value(params.get("project_id"))
         if allow_project_filter and project_id:
             if not str(project_id).isdigit():
                 raise ValidationError({"project_id": ["project_id must be an integer."]})
             queryset = queryset.filter(project_id=int(project_id))
 
-        due_date = params.get("due_date")
+        due_date = TaskService._clean_filter_value(params.get("due_date"))
         if due_date:
             queryset = queryset.filter(due_date=due_date)
 
-        search = (params.get("search") or "").strip()
+        search = TaskService._clean_filter_value(params.get("search")) or ""
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search)
@@ -108,15 +128,15 @@ class TaskService:
                 | Q(assignee__user__email__icontains=search)
             )
 
-        ordering = params.get("ordering") or "-created_at"
+        ordering = TaskService._clean_filter_value(params.get("ordering")) or "-created_at"
         if ordering not in TaskService.VALID_ORDERING_FIELDS:
             raise ValidationError({"ordering": ["Invalid ordering value."]})
         return queryset.order_by(ordering)
 
     @staticmethod
     def _paginate_queryset(queryset: QuerySet[Task], *, params) -> dict:
-        page = params.get("page", 1)
-        page_size = params.get("page_size", 10)
+        page = TaskService._clean_filter_value(params.get("page")) or 1
+        page_size = TaskService._clean_filter_value(params.get("page_size")) or 10
 
         try:
             page_number = int(page)
@@ -144,7 +164,6 @@ class TaskService:
         membership = TaskService._get_membership(user=user, project=project)
         if membership.role not in TaskService.ADMIN_ROLES:
             raise TaskPermissionError("You do not have permission to create tasks in this project.")
-
         assignee = TaskService._validate_assignee(project=project, assignee_id=validated_data["assignee_id"])
 
         with cast(Any, transaction).atomic():
@@ -164,19 +183,22 @@ class TaskService:
     @staticmethod
     def list_project_tasks(*, user, project_id: int, params) -> dict:
         project = TaskService._get_active_project(project_id=project_id)
-        TaskService._get_membership(user=user, project=project)
+        membership = TaskService._get_membership(user=user, project=project)
         queryset = TaskService._base_queryset().filter(project=project, is_active=True)
-        filtered = TaskService._apply_filters(queryset, params=params, allow_project_filter=False)
+        if membership.role not in TaskService.ADMIN_ROLES:
+            queryset = queryset.filter(assignee__user=user)
+        filtered = TaskService._with_comment_count(TaskService._apply_filters(queryset, params=params, allow_project_filter=False))
         return TaskService._paginate_queryset(filtered, params=params)
 
     @staticmethod
     def list_accessible_tasks(*, user, params) -> dict:
+        TaskService._require_account_admin(user=user)
         queryset = TaskService._base_queryset().filter(
             is_active=True,
             project__is_active=True,
-            project__members__user=user,
-        ).distinct()
-        filtered = TaskService._apply_filters(queryset, params=params, allow_project_filter=True)
+        )
+        queryset = queryset.distinct()
+        filtered = TaskService._with_comment_count(TaskService._apply_filters(queryset, params=params, allow_project_filter=True))
         return TaskService._paginate_queryset(filtered, params=params)
 
     @staticmethod
@@ -187,7 +209,7 @@ class TaskService:
             assignee__user=user,
             project__members__user=user,
         ).distinct()
-        filtered = TaskService._apply_filters(queryset, params=params, allow_project_filter=True)
+        filtered = TaskService._with_comment_count(TaskService._apply_filters(queryset, params=params, allow_project_filter=True))
         return TaskService._paginate_queryset(filtered, params=params)
 
     @staticmethod
@@ -197,10 +219,12 @@ class TaskService:
                 id=task_id,
                 is_active=True,
                 project__is_active=True,
-                project__members__user=user,
             )
         except Task.DoesNotExist as exc:
             raise TaskNotFoundError("Task not found.") from exc
+        membership = TaskService._get_membership(user=user, project=task.project)
+        if membership.role not in TaskService.ADMIN_ROLES and task.assignee.user_id != user.id:
+            raise TaskPermissionError("Permission denied.")
         return task
 
     @staticmethod
@@ -216,13 +240,10 @@ class TaskService:
                 raise TaskNotFoundError("Task not found.") from exc
 
             membership = TaskService._get_membership(user=user, project=task.project)
+            if membership.role not in TaskService.ADMIN_ROLES:
+                raise TaskPermissionError("You do not have permission to update this task.")
 
-            if membership.role in TaskService.ADMIN_ROLES:
-                allowed_fields = {"title", "description", "assignee_id", "priority", "status", "due_date"}
-            else:
-                if task.assignee.user_id != user.id:
-                    raise TaskPermissionError("You can only update your own assigned task.")
-                allowed_fields = {"status"}
+            allowed_fields = {"title", "description", "assignee_id", "priority", "status", "due_date"}
 
             invalid_fields = sorted(set(validated_data.keys()) - allowed_fields)
             if invalid_fields:

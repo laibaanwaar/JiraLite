@@ -3,12 +3,13 @@ import logging
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import DatabaseError
 from rest_framework import status
-from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, ValidationError as DRFValidationError
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from projects.serializers import TaskListSerializer
+from projects.permissions import IsAccountAdmin
 from projects.services.task_service import TaskService
 
 
@@ -16,13 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 class TaskListView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAccountAdmin]
 
     def handle_exception(self, exc):
         if isinstance(exc, (NotAuthenticated, AuthenticationFailed)):
             return Response(
                 {"success": False, "message": "Authentication credentials were not provided or are invalid.", "errors": {}},
                 status=status.HTTP_401_UNAUTHORIZED,
+            )
+        if isinstance(exc, PermissionDenied):
+            return Response(
+                {"success": False, "message": "Permission denied.", "errors": {}},
+                status=status.HTTP_403_FORBIDDEN,
             )
         return super().handle_exception(exc)
 

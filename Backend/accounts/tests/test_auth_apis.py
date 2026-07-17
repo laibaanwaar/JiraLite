@@ -24,6 +24,7 @@ class AuthApiTests(APITestCase):
         self.resend_url = reverse("auth-resend-verification")
         self.login_url = reverse("auth-login")
         self.logout_url = reverse("auth-logout")
+        self.me_url = reverse("auth-me")
 
     def test_signup_success(self):
         response = self.client.post(
@@ -42,10 +43,28 @@ class AuthApiTests(APITestCase):
         user = User.objects.get(email="jane.doe@example.com")
         self.assertFalse(user.is_email_verified)
         self.assertTrue(user.check_password("VeryStrongPass123!"))
+        self.assertEqual(user.role.code, "ADMIN")
         self.assertEqual(EmailVerification.objects.filter(user=user).count(), 1)
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("6-digit OTP", mail.outbox[0].body)
         self.assertNotIn("token=", mail.outbox[0].body)
+
+    def test_signup_rejects_submitted_role(self):
+        response = self.client.post(
+            self.signup_url,
+            {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "email": "role@example.com",
+                "password": "VeryStrongPass123!",
+                "confirm_password": "VeryStrongPass123!",
+                "role": "MEMBER",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["errors"]["role"], ["This field is not allowed."])
 
     def test_signup_rejects_duplicate_email_case_insensitive(self):
         User.objects.create_user(
@@ -490,8 +509,27 @@ class AuthApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["success"])
         self.assertEqual(response.data["data"]["user"]["email"], user.email)
+        self.assertEqual(response.data["data"]["user"]["role"]["code"], "ADMIN")
         user.refresh_from_db()
         self.assertIsNotNone(user.last_login)
+
+    def test_auth_me_returns_role_structure(self):
+        user = User.objects.create_user(
+            first_name="Sara",
+            last_name="Ahmed",
+            email="me@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
+
+        response = self.client.get(self.me_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["email"], user.email)
+        self.assertEqual(response.data["data"]["role"]["code"], "ADMIN")
 
     def test_login_rejects_invalid_credentials(self):
         User.objects.create_user(

@@ -40,7 +40,7 @@ class ProjectInvitation(models.Model):
     )
     invited_email = models.EmailField(db_index=True)
     message = models.CharField(max_length=500, blank=True)
-    role = models.CharField(max_length=20, default="MEMBER")
+    project_role = models.CharField(max_length=20, default="MEMBER")
     token_hash = models.CharField(max_length=64, unique=True, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     email_status = models.CharField(
@@ -57,6 +57,7 @@ class ProjectInvitation(models.Model):
         related_name="accepted_project_invitations",
     )
     accepted_at = models.DateTimeField(null=True, blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -70,9 +71,23 @@ class ProjectInvitation(models.Model):
             )
         ]
 
+    def __init__(self, *args, **kwargs):
+        legacy_role = kwargs.pop("role", None)
+        super().__init__(*args, **kwargs)
+        if legacy_role is not None:
+            self.project_role = legacy_role
+
     def save(self, *args, **kwargs):
         self.invited_email = (self.invited_email or "").strip().lower()
         super().save(*args, **kwargs)
+
+    @property
+    def role(self):
+        return self.project_role
+
+    @role.setter
+    def role(self, value):
+        self.project_role = value
 
     def __str__(self) -> str:
         return f"{self.project_id}:{self.invited_email}:{self.status}"

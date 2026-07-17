@@ -222,6 +222,10 @@ BACKEND_BASE_URL = config(
     "BACKEND_BASE_URL",
     default="http://127.0.0.1:8000",
 )
+FRONTEND_URL = config(
+    "FRONTEND_URL",
+    default="",
+)
 FRONTEND_ACCEPT_INVITATION_URL = config(
     "FRONTEND_ACCEPT_INVITATION_URL",
     default="",

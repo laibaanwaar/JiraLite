@@ -9,7 +9,8 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from projects.models import Project, ProjectMember, Task
+from accounts.models import Role
+from projects.models import Project, ProjectMember, Task, TaskComment
 
 
 User = get_user_model()
@@ -49,6 +50,8 @@ class TaskApiTests(APITestCase):
             is_email_verified=True,
             is_active=True,
         )
+        self.member.role = Role.objects.get(code="MEMBER")
+        self.member.save(update_fields=["role"])
 
         self.project = Project.objects.create(
             name="JiraLite",
@@ -106,7 +109,9 @@ class TaskApiTests(APITestCase):
         self.project_task_list_url = reverse("project-task-list", kwargs={"project_id": self.project.id})
         self.all_tasks_url = reverse("task-list")
         self.my_tasks_url = reverse("task-my-list")
+        self.my_tasks_alias_url = reverse("my-task-list")
         self.task_detail_url = reverse("task-detail", kwargs={"task_id": self.task.id})
+        self.task_comments_url = reverse("task-comment-list", kwargs={"task_id": self.task.id})
 
         refresh = RefreshToken.for_user(self.owner)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}")
@@ -195,9 +200,57 @@ class TaskApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_project_task_list_requires_membership(self):
+        self.other.role = Role.objects.get(code="MEMBER")
+        self.other.save(update_fields=["role"])
         self.authenticate(self.other)
         response = self.client.get(self.project_task_list_url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_project_task_list_returns_only_selected_project_tasks(self):
+        owner_task = Task.objects.create(
+            project=self.project,
+            title="Owner Project Task",
+            description="Task in selected project.",
+            assignee=self.owner_membership,
+            created_by=self.owner,
+            priority=Task.PRIORITY_MEDIUM,
+            status=Task.STATUS_TO_DO,
+            due_date=date.today() + timedelta(days=2),
+        )
+
+        response = self.client.get(self.project_task_list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        returned_ids = {item["id"] for item in response.data["data"]["results"]}
+        self.assertIn(self.task.id, returned_ids)
+        self.assertIn(owner_task.id, returned_ids)
+        self.assertNotIn(self.other_task.id, returned_ids)
+
+    def test_project_member_can_list_only_assigned_tasks_in_their_project(self):
+        admin_task = Task.objects.create(
+            project=self.project,
+            title="Admin Assigned Task",
+            description="Visible to project members.",
+            assignee=self.admin_membership,
+            created_by=self.owner,
+            priority=Task.PRIORITY_MEDIUM,
+            status=Task.STATUS_TO_DO,
+            due_date=date.today() + timedelta(days=2),
+        )
+        self.authenticate(self.member)
+
+        response = self.client.get(self.project_task_list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        returned_ids = {item["id"] for item in response.data["data"]["results"]}
+        self.assertIn(self.task.id, returned_ids)
+        self.assertNotIn(admin_task.id, returned_ids)
+        self.assertNotIn(self.other_task.id, returned_ids)
+
+    def test_project_task_list_returns_404_for_missing_project(self):
+        response = self.client.get(reverse("project-task-list", kwargs={"project_id": 99999}))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_project_task_list_supports_filters_and_search(self):
         Task.objects.create(
@@ -218,12 +271,40 @@ class TaskApiTests(APITestCase):
         self.assertEqual(response.data["data"]["count"], 1)
         self.assertEqual(response.data["data"]["results"][0]["title"], "Review login docs")
 
-    def test_all_tasks_only_returns_accessible_projects(self):
+    def test_admin_global_tasks_returns_all_active_tasks(self):
+        owner_task = Task.objects.create(
+            project=self.project,
+            title="Owner Assigned Task",
+            description="Visible to the assigned owner.",
+            assignee=self.owner_membership,
+            created_by=self.owner,
+            priority=Task.PRIORITY_MEDIUM,
+            status=Task.STATUS_TO_DO,
+            due_date=date.today() + timedelta(days=2),
+        )
+
         response = self.client.get(self.all_tasks_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         returned_ids = {item["id"] for item in response.data["data"]["results"]}
+        self.assertIn(owner_task.id, returned_ids)
         self.assertIn(self.task.id, returned_ids)
-        self.assertNotIn(self.other_task.id, returned_ids)
+        self.assertIn(self.other_task.id, returned_ids)
+
+    def test_member_global_tasks_is_forbidden(self):
+        self.authenticate(self.member)
+
+        response = self.client.get(self.all_tasks_url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["message"], "Permission denied.")
+
+    def test_all_tasks_ignores_default_all_filter_values(self):
+        response = self.client.get(
+            f"{self.all_tasks_url}?project_id=all&status=All%20Status&priority=All%20Priority&search=&page=undefined&page_size=undefined"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("results", response.data["data"])
 
     def test_my_tasks_only_returns_assigned_tasks(self):
         self.authenticate(self.member)
@@ -232,11 +313,62 @@ class TaskApiTests(APITestCase):
         self.assertEqual(response.data["data"]["count"], 1)
         self.assertEqual(response.data["data"]["results"][0]["id"], self.task.id)
 
-    def test_task_detail_hides_inaccessible_task(self):
+    def test_my_tasks_alias_only_returns_assigned_tasks(self):
+        self.authenticate(self.member)
+        response = self.client.get(self.my_tasks_alias_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["count"], 1)
+        self.assertEqual(response.data["data"]["results"][0]["id"], self.task.id)
+
+    def test_member_can_view_assigned_task_detail(self):
+        self.authenticate(self.member)
+
+        response = self.client.get(self.task_detail_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["id"], self.task.id)
+
+    def test_member_cannot_view_unassigned_task_detail_in_their_project(self):
+        admin_task = Task.objects.create(
+            project=self.project,
+            title="Admin task",
+            description="Assigned elsewhere",
+            assignee=self.admin_membership,
+            created_by=self.owner,
+            priority=Task.PRIORITY_LOW,
+            status=Task.STATUS_TO_DO,
+            due_date=date.today() + timedelta(days=4),
+        )
+        self.authenticate(self.member)
+
+        response = self.client.get(reverse("task-detail", kwargs={"task_id": admin_task.id}))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_task_detail_rejects_non_project_member(self):
         self.authenticate(self.member)
         other_task_url = reverse("task-detail", kwargs={"task_id": self.other_task.id})
         response = self.client.get(other_task_url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_task_detail_returns_404_for_missing_task(self):
+        response = self.client.get(reverse("task-detail", kwargs={"task_id": 99999}))
+
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_task_detail_returns_required_fields_for_admin(self):
+        response = self.client.get(self.task_detail_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["title"], self.task.title)
+        self.assertEqual(response.data["data"]["description"], self.task.description)
+        self.assertEqual(response.data["data"]["project"]["id"], self.project.id)
+        self.assertEqual(response.data["data"]["assignee"]["project_member_id"], self.member_membership.id)
+        self.assertIn("status", response.data["data"])
+        self.assertIn("priority", response.data["data"])
+        self.assertIn("due_date", response.data["data"])
+        self.assertIn("created_at", response.data["data"])
+        self.assertIn("updated_at", response.data["data"])
 
     def test_owner_can_update_all_allowed_fields(self):
         response = self.client.patch(
@@ -254,16 +386,16 @@ class TaskApiTests(APITestCase):
         self.assertEqual(self.task.title, "Create Auth API")
         self.assertEqual(self.task.assignee_id, self.admin_membership.id)
 
-    def test_member_can_update_only_own_status(self):
+    def test_member_cannot_update_own_task_status(self):
         self.authenticate(self.member)
         response = self.client.patch(
             self.task_detail_url,
             {"status": Task.STATUS_IN_PROGRESS},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.task.refresh_from_db()
-        self.assertEqual(self.task.status, Task.STATUS_IN_PROGRESS)
+        self.assertEqual(self.task.status, Task.STATUS_TO_DO)
 
     def test_member_cannot_update_own_title(self):
         self.authenticate(self.member)
@@ -365,6 +497,166 @@ class TaskApiTests(APITestCase):
     def test_invalid_ordering_returns_400(self):
         response = self.client.get(f"{self.all_tasks_url}?ordering=bad_field")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_project_task_list_includes_comment_count(self):
+        TaskComment.objects.create(task=self.task, author=self.owner, content="First comment")
+        TaskComment.objects.create(task=self.task, author=self.member, content="Second comment")
+
+        response = self.client.get(self.project_task_list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task_data = next(item for item in response.data["data"]["results"] if item["id"] == self.task.id)
+        self.assertEqual(task_data["comment_count"], 2)
+
+    def test_project_member_can_create_task_comment(self):
+        self.authenticate(self.member)
+
+        response = self.client.post(
+            self.task_comments_url,
+            {"content": "I started working on this."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(TaskComment.objects.filter(task=self.task, author=self.member).count(), 1)
+        self.assertEqual(response.data["data"]["content"], "I started working on this.")
+        self.assertEqual(response.data["data"]["author"]["id"], self.member.id)
+        self.assertEqual(response.data["data"]["author"]["name"], "Member User")
+        self.assertEqual(response.data["data"]["author"]["email"], self.member.email)
+        self.assertEqual(response.data["data"]["author"]["role"]["code"], "MEMBER")
+        self.assertEqual(response.data["data"]["author"]["initials"], "MU")
+        self.assertTrue(response.data["data"]["can_edit"])
+        self.assertTrue(response.data["data"]["can_delete"])
+
+    def test_project_member_can_list_comments_for_project_task(self):
+        owner_comment = TaskComment.objects.create(task=self.task, author=self.owner, content="Owner note")
+        member_comment = TaskComment.objects.create(task=self.task, author=self.member, content="Member note")
+        TaskComment.objects.create(task=self.other_task, author=self.other, content="Other project note")
+        self.authenticate(self.member)
+
+        response = self.client.get(self.task_comments_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["count"], 2)
+        returned_ids = {item["id"] for item in response.data["data"]["results"]}
+        self.assertEqual(returned_ids, {owner_comment.id, member_comment.id})
+        owner_data = next(item for item in response.data["data"]["results"] if item["id"] == owner_comment.id)
+        member_data = next(item for item in response.data["data"]["results"] if item["id"] == member_comment.id)
+        self.assertFalse(owner_data["can_edit"])
+        self.assertFalse(owner_data["can_delete"])
+        self.assertTrue(member_data["can_edit"])
+        self.assertTrue(member_data["can_delete"])
+
+    def test_comment_list_returns_404_for_missing_task(self):
+        response = self.client.get(reverse("task-comment-list", kwargs={"task_id": 99999}))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_non_member_cannot_list_or_create_task_comments(self):
+        outsider = User.objects.create_user(
+            first_name="No",
+            last_name="Member",
+            email="nomember@example.com",
+            password="UserPassword@123",
+            is_email_verified=True,
+            is_active=True,
+        )
+        self.authenticate(outsider)
+
+        list_response = self.client.get(self.task_comments_url)
+        create_response = self.client.post(
+            self.task_comments_url,
+            {"content": "Trying to join in."},
+            format="json",
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(create_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(TaskComment.objects.filter(task=self.task, author=outsider).exists())
+
+    def test_cross_project_member_cannot_access_task_comments(self):
+        self.authenticate(self.other)
+
+        response = self.client.get(self.task_comments_url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_comment_author_can_update_own_comment(self):
+        comment = TaskComment.objects.create(task=self.task, author=self.member, content="Old content")
+        self.authenticate(self.member)
+
+        response = self.client.patch(
+            reverse("task-comment-detail", kwargs={"comment_id": comment.id}),
+            {"content": "Updated content"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        comment.refresh_from_db()
+        self.assertEqual(comment.content, "Updated content")
+        self.assertEqual(response.data["data"]["content"], "Updated content")
+
+    def test_comment_author_can_delete_own_comment(self):
+        comment = TaskComment.objects.create(task=self.task, author=self.member, content="Remove me")
+        self.authenticate(self.member)
+
+        response = self.client.delete(reverse("task-comment-detail", kwargs={"comment_id": comment.id}))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(TaskComment.objects.filter(id=comment.id).exists())
+
+    def test_admin_cannot_update_or_delete_another_users_comment(self):
+        comment = TaskComment.objects.create(task=self.task, author=self.member, content="Member note")
+        self.authenticate(self.admin)
+
+        update_response = self.client.patch(
+            reverse("task-comment-detail", kwargs={"comment_id": comment.id}),
+            {"content": "Admin edit"},
+            format="json",
+        )
+        delete_response = self.client.delete(reverse("task-comment-detail", kwargs={"comment_id": comment.id}))
+
+        self.assertEqual(update_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(delete_response.status_code, status.HTTP_403_FORBIDDEN)
+        comment.refresh_from_db()
+        self.assertEqual(comment.content, "Member note")
+
+    def test_task_assignee_cannot_modify_another_users_comment(self):
+        comment = TaskComment.objects.create(task=self.task, author=self.owner, content="Owner note")
+        self.authenticate(self.member)
+
+        response = self.client.patch(
+            reverse("task-comment-detail", kwargs={"comment_id": comment.id}),
+            {"content": "Assignee edit"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        comment.refresh_from_db()
+        self.assertEqual(comment.content, "Owner note")
+
+    def test_cross_project_member_cannot_update_comment(self):
+        comment = TaskComment.objects.create(task=self.task, author=self.member, content="Project note")
+        self.authenticate(self.other)
+
+        response = self.client.patch(
+            reverse("task-comment-detail", kwargs={"comment_id": comment.id}),
+            {"content": "Cross-project edit"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        comment.refresh_from_db()
+        self.assertEqual(comment.content, "Project note")
+
+    def test_update_missing_comment_returns_404(self):
+        response = self.client.patch(
+            reverse("task-comment-detail", kwargs={"comment_id": 99999}),
+            {"content": "Missing"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_database_error_returns_500_on_create(self):
         with patch("projects.services.task_service.TaskService.create_task", side_effect=DatabaseError("db")):

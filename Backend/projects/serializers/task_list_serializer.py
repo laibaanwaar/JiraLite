@@ -20,5 +20,6 @@ class TaskListSerializer(serializers.Serializer):
             "priority": instance.priority,
             "status": instance.status,
             "due_date": instance.due_date,
+            "comment_count": getattr(instance, "comment_count", 0),
             "created_at": instance.created_at,
         }
