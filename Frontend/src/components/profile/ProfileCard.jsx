@@ -36,8 +36,13 @@ export default function ProfileCard({ onEdit, profile }) {
   const fullName = profile?.full_name || `${firstName} ${lastName}`.trim() || profile?.email || ''
   const email = profile?.email || ''
   const phone = profile?.profile?.phone || ''
-  const bio = profile?.profile?.bio || ''
   const role = profile?.role?.name || profile?.role?.code || profile?.role_code || profile?.role || 'Member'
+  const designation =
+    profile?.profile?.designation ||
+    profile?.designation ||
+    profile?.job_title ||
+    profile?.profile?.job_title ||
+    role
 
   return (
     <>
@@ -82,23 +87,14 @@ export default function ProfileCard({ onEdit, profile }) {
 
       <div className="my-8 h-px bg-slate-200" />
 
-      {bio ? (
-        <section aria-labelledby="about-title">
-          <h2 id="about-title" className="m-0 text-base font-extrabold text-slate-900">
-            About Me
-          </h2>
-          <p className="mt-4 max-w-[560px] text-base font-semibold leading-8 text-slate-600">{bio}</p>
-        </section>
-      ) : (
-        <section aria-labelledby="about-title">
-          <h2 id="about-title" className="m-0 text-base font-extrabold text-slate-900">
-            About Me
-          </h2>
-          <p className="mt-4 max-w-[560px] text-base font-semibold leading-8 text-slate-400">
-            Add a short bio so your team can get to know you.
-          </p>
-        </section>
-      )}
+      <section aria-labelledby="designation-title">
+        <h2 id="designation-title" className="m-0 text-base font-extrabold text-slate-900">
+          Designation
+        </h2>
+        <p className="mt-4 max-w-[560px] text-base font-semibold leading-8 text-slate-600">
+          {designation || 'No designation added yet.'}
+        </p>
+      </section>
     </>
   )
 }

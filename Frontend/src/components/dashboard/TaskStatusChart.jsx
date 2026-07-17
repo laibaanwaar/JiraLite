@@ -38,48 +38,50 @@ export default function TaskStatusChart({ totalTasks, items }) {
   }))
 
   const hasData = chartItems.some((item) => item.count > 0)
-  const emptyChartItems = [
-    { label: 'To Do', count: 1, color: getChartStatusColor('TO_DO') },
-    { label: 'In Progress', count: 1, color: getChartStatusColor('IN_PROGRESS') },
-    { label: 'In Review', count: 1, color: getChartStatusColor('IN_REVIEW') },
-    { label: 'Done', count: 1, color: getChartStatusColor('DONE') },
-  ]
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_14px_34px_rgba(15,23,42,0.05)]">
-      <h2 className="text-[18px] font-extrabold text-slate-900">Tasks Overview</h2>
-      <div className="mt-6 grid gap-6 lg:grid-cols-[320px_1fr] lg:items-center">
-        <div className="relative h-[260px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={hasData ? chartItems : emptyChartItems}
-                dataKey="count"
-                innerRadius={68}
-                outerRadius={106}
-                paddingAngle={1}
-                strokeWidth={0}
-              >
-                {(hasData ? chartItems : emptyChartItems).map((item) => (
-                  <Cell key={item.label} fill={item.color} fillOpacity={hasData ? 1 : 0.28} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-5xl font-black tracking-tight text-slate-900">{safeTotal}</span>
-            <span className="mt-2 text-base font-medium text-slate-500">Total</span>
-          </div>
+    <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-xl font-extrabold text-slate-900">Tasks Overview</h2>
+      <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-center">
+        <div className="relative h-[240px] min-w-0">
+          {hasData ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={chartItems}
+                    dataKey="count"
+                    innerRadius={55}
+                    outerRadius={82}
+                    paddingAngle={1}
+                    strokeWidth={0}
+                  >
+                    {chartItems.map((item) => (
+                      <Cell key={item.label} fill={item.color} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-3xl font-black tracking-tight text-slate-900">{safeTotal}</span>
+                <span className="mt-1 text-sm font-medium text-slate-500">Total</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-sm font-semibold text-slate-500">
+              No task data available.
+            </div>
+          )}
         </div>
 
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-3">
           {chartItems.map((item) => (
-            <div key={item.status || item.label} className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="h-4 w-4 rounded-full" style={{ backgroundColor: item.color }} aria-hidden="true" />
-                <span className="text-[15px] font-medium text-slate-700">{item.label}</span>
+            <div key={item.status || item.label} className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: item.color }} aria-hidden="true" />
+                <span className="truncate text-sm font-medium text-slate-700">{item.label}</span>
               </div>
-              <div className="text-xl font-extrabold text-slate-900">{item.count}</div>
+              <div className="shrink-0 text-sm font-extrabold text-slate-900">{item.count}</div>
             </div>
           ))}
         </div>

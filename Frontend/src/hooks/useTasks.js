@@ -95,6 +95,45 @@ export default function useTasks({ mode = 'all', projectId = '', filters = {}, p
   const requestIdRef = useRef(0)
 
   useEffect(() => {
+    function handleTaskUpdated(e) {
+      const updatedTask = e?.detail?.task
+      if (!updatedTask) return
+
+      if (projectId || filters.project_id) {
+        const scopedProjectId = projectId || filters.project_id
+        if (String(updatedTask.project?.id || updatedTask.project_id) !== String(scopedProjectId)) {
+          return
+        }
+      }
+
+      setRefreshKey((v) => v + 1)
+    }
+
+    function handleTaskDeleted(e) {
+      const deletedTaskId = e?.detail?.taskId
+      if (!deletedTaskId) return
+
+      // If scoped to a project, always refetch to keep list consistent; otherwise only refetch if the deleted task is in current page
+      if (projectId || filters.project_id) {
+        setRefreshKey((v) => v + 1)
+        return
+      }
+
+      // if not scoped, check if deleted task is currently in our tasks list
+      if (tasks.some((t) => String(t.id) === String(deletedTaskId))) {
+        setRefreshKey((v) => v + 1)
+      }
+    }
+
+    window.addEventListener('jira-lite:task-updated', handleTaskUpdated)
+    window.addEventListener('jira-lite:task-deleted', handleTaskDeleted)
+    return () => {
+      window.removeEventListener('jira-lite:task-updated', handleTaskUpdated)
+      window.removeEventListener('jira-lite:task-deleted', handleTaskDeleted)
+    }
+  }, [projectId, filters.project_id])
+
+  useEffect(() => {
     const controller = new AbortController()
     requestIdRef.current += 1
     const requestId = requestIdRef.current

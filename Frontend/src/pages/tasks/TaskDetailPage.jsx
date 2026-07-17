@@ -16,7 +16,7 @@ export default function TaskDetailPage({ taskId }) {
   const currentUser = useMemo(() => getStoredUser(), [])
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const { errorMessage, isDeleting, isLoading, removeTask, successMessage, task } = useTask(taskId)
-  const isManager = canManageTask(task)
+  const isManager = canManageTask(task) || Boolean(task?.permissions?.canDelete || task?.permissions?.can_delete)
   const canUpdateStatusOnly = canUpdateAssignedTask(task, currentUser?.id)
 
   const handleDelete = async () => {
@@ -101,6 +101,18 @@ export default function TaskDetailPage({ taskId }) {
                   <dd className="m-0 mt-2 text-sm font-semibold text-slate-700">{task.updated_at || 'Unknown'}</dd>
                 </div>
               </dl>
+
+              {isManager ? (
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteModal(true)}
+                    className="rounded-lg border border-rose-200 px-4 py-2 text-sm font-extrabold text-rose-700 transition hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
+                  >
+                    Delete Task
+                  </button>
+                </div>
+              ) : null}
             </section>
           ) : null}
 

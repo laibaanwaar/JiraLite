@@ -84,6 +84,11 @@ export default function useTask(taskId) {
     try {
       const response = await updateTask(taskId, payload)
       setTask(response.task)
+      try {
+        window.dispatchEvent(new CustomEvent('jira-lite:task-updated', { detail: { task: response.task } }))
+      } catch (e) {
+        // ignore if CustomEvent not supported
+      }
       setSuccessMessage(response.message || 'Task updated successfully.')
       return { ok: true, task: response.task }
     } catch (error) {
@@ -110,6 +115,11 @@ export default function useTask(taskId) {
     try {
       const response = await deleteTask(taskId)
       setSuccessMessage(response.message || 'Task deleted successfully.')
+      try {
+        window.dispatchEvent(new CustomEvent('jira-lite:task-deleted', { detail: { taskId } }))
+      } catch (e) {
+        // ignore if CustomEvent not supported
+      }
       return { ok: true, message: response.message }
     } catch (error) {
       const normalized = normalizeTaskError(error)

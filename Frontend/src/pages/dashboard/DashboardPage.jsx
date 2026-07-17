@@ -2,10 +2,10 @@ import DashboardEmptyState from '../../components/dashboard/DashboardEmptyState.
 import DashboardErrorState from '../../components/dashboard/DashboardErrorState.jsx'
 import DashboardSkeleton from '../../components/dashboard/DashboardSkeleton.jsx'
 import DashboardStats from '../../components/dashboard/DashboardStats.jsx'
-import RecentProjects from '../../components/dashboard/RecentProjects.jsx'
-import RecentTasks from '../../components/dashboard/RecentTasks.jsx'
 import TaskPriorityChart from '../../components/dashboard/TaskPriorityChart.jsx'
 import TaskStatusChart from '../../components/dashboard/TaskStatusChart.jsx'
+import RecentTasks from '../../components/dashboard/RecentTasks.jsx'
+import { deleteTask } from '../../services/taskService.js'
 import PageHeader from '../../components/layout/PageHeader.jsx'
 import AuthenticatedLayout from '../../layouts/AuthenticatedLayout.jsx'
 import { getSafeNumber } from '../../components/dashboard/dashboardUtils.js'
@@ -20,12 +20,12 @@ function ProjectFilter({ dashboardData, selectedProjectId, setSelectedProjectId 
   }
 
   return (
-    <label className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm">
-      <span>Project</span>
+    <label className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-600 shadow-sm sm:w-[280px]">
+      <span className="shrink-0">Project</span>
       <select
         value={selectedProjectId}
         onChange={(event) => setSelectedProjectId(event.target.value)}
-        className="bg-transparent font-bold text-slate-900 outline-none"
+        className="min-w-0 flex-1 bg-transparent font-bold text-slate-900 outline-none"
       >
         <option value="">{dashboardData.scope === 'managed' ? 'All Managed Projects' : 'All My Projects'}</option>
         {options.map((project) => (
@@ -55,13 +55,13 @@ export default function DashboardPage() {
   const showEmptyState = hasLoadedDashboard && hasNoProjects && hasNoTasks
 
   return (
-    <AuthenticatedLayout activePath="/dashboard">
+    <AuthenticatedLayout activePath="/dashboard" frameClassName="max-w-[1440px]" mainClassName="py-5 md:py-6">
       {isLoading && !hasLoadedDashboard ? <DashboardSkeleton /> : null}
 
       {!isLoading && !hasLoadedDashboard && error ? <DashboardErrorState message={error} onRetry={retry} /> : null}
 
       {hasLoadedDashboard ? (
-        <section aria-labelledby="dashboard-title" className="space-y-6">
+        <section aria-labelledby="dashboard-title" className="space-y-5">
           <PageHeader
             eyebrow={isManagedScope ? 'Managed Scope' : 'Member Scope'}
             title="Dashboard"
@@ -70,13 +70,6 @@ export default function DashboardPage() {
                 ? 'Overview of the projects and tasks you manage.'
                 : 'Overview of your projects and assigned tasks.'
             }
-            actions={(
-              <ProjectFilter
-                dashboardData={dashboardData}
-                selectedProjectId={selectedProjectId}
-                setSelectedProjectId={setSelectedProjectId}
-              />
-            )}
           />
 
           {error ? (
@@ -100,23 +93,38 @@ export default function DashboardPage() {
             />
           ) : (
             <>
-              <div className="grid gap-6 xl:grid-cols-2">
-                <TaskStatusChart totalTasks={dashboardData.summary.total_tasks} items={dashboardData.tasks_by_status} />
-                <TaskPriorityChart items={dashboardData.tasks_by_priority} />
+              <div className="grid gap-5 xl:grid-cols-2">
+                <div className="min-w-0">
+                  <TaskStatusChart totalTasks={dashboardData.summary.total_tasks} items={dashboardData.tasks_by_status} />
+                </div>
+                <div className="min-w-0">
+                  <TaskPriorityChart items={dashboardData.tasks_by_priority} />
+                </div>
               </div>
 
-              <div className="grid gap-6 xl:grid-cols-[1fr_1.2fr]">
-                <RecentProjects
-                  projects={dashboardData.recent_projects}
-                  showProjectsLink
-                  onProjectClick={(project) => project?.id && navigateTo(`/projects/${project.id}`)}
-                  onViewAllProjects={() => navigateTo('/projects')}
-                />
-                <RecentTasks
-                  tasks={dashboardData.recent_tasks}
-                  onTaskClick={(task) => task?.id && navigateTo(`/tasks/${task.id}`)}
-                />
+              <div className="grid gap-5 xl:grid-cols-2">
+                <div className="min-w-0">
+                  <RecentTasks
+                    tasks={dashboardData.recent_tasks || []}
+                    userId={dashboardData.current_user?.id}
+                    onView={(task) => navigateTo(`/tasks/${task.id}`)}
+                    onEdit={(task) => navigateTo(`/tasks/${task.id}/edit`)}
+                    onUpdateStatus={(task) => navigateTo(`/tasks/${task.id}/edit`)}
+                    onDelete={async (task) => {
+                      if (!window.confirm(`Delete task "${task.title}"? This cannot be undone.`)) return
+
+                      try {
+                        await deleteTask(task.id)
+                        try { window.dispatchEvent(new CustomEvent('jira-lite:task-deleted', { detail: { taskId: task.id } })) } catch (e) {}
+                      } catch (e) {
+                        // ignore — could show error notification
+                      }
+                    }}
+                    onTaskClick={(task) => navigateTo(`/tasks/${task.id}`)}
+                  />
+                </div>
               </div>
+
             </>
           )}
         </section>

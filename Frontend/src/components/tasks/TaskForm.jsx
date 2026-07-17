@@ -46,7 +46,7 @@ function getFieldError(errors, fieldName) {
   return typeof value === 'string' ? value : ''
 }
 
-function validateTask(values, members, requiresProject = true) {
+function validateTask(values, members, requiresProject = true, readOnlyStatusOnly = false) {
   const nextErrors = {}
   const today = '2026-07-16'
   const normalizedTitle = values.title.trim()
@@ -66,28 +66,30 @@ function validateTask(values, members, requiresProject = true) {
     nextErrors.description = 'Description must be 5000 characters or less.'
   }
 
-  if (!values.assignee_id) {
-    nextErrors.assignee_id = 'Select an assignee.'
-  } else if (!members.some((member) => String(member.id || member.project_member_id) === values.assignee_id)) {
-    nextErrors.assignee_id = 'Select a valid assignee from this project.'
-  }
+  if (!readOnlyStatusOnly) {
+    if (!values.assignee_id) {
+      nextErrors.assignee_id = 'Select an assignee.'
+    } else if (!members.some((member) => String(member.id || member.project_member_id) === values.assignee_id)) {
+      nextErrors.assignee_id = 'Select a valid assignee from this project.'
+    }
 
-  if (!TASK_PRIORITY_OPTIONS.some((option) => option.value === values.priority)) {
-    nextErrors.priority = 'Select a valid priority.'
+    if (!TASK_PRIORITY_OPTIONS.some((option) => option.value === values.priority)) {
+      nextErrors.priority = 'Select a valid priority.'
+    }
+
+    if (values.due_date) {
+      const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(values.due_date)
+
+      if (!isValidDate) {
+        nextErrors.due_date = 'Use YYYY-MM-DD format.'
+      } else if (values.due_date < today) {
+        nextErrors.due_date = 'Due date cannot be in the past.'
+      }
+    }
   }
 
   if (!TASK_STATUS_OPTIONS.some((option) => option.value === values.status)) {
     nextErrors.status = 'Select a valid status.'
-  }
-
-  if (values.due_date) {
-    const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(values.due_date)
-
-    if (!isValidDate) {
-      nextErrors.due_date = 'Use YYYY-MM-DD format.'
-    } else if (values.due_date < today) {
-      nextErrors.due_date = 'Due date cannot be in the past.'
-    }
   }
 
   return nextErrors
@@ -178,7 +180,7 @@ export default function TaskForm({
       description: formValues.description.trim(),
     }
 
-    const validationErrors = validateTask(trimmedValues, activeMembers, requiresProject)
+    const validationErrors = validateTask(trimmedValues, activeMembers, requiresProject, readOnlyStatusOnly)
     setClientErrors(validationErrors)
 
     if (Object.keys(validationErrors).length > 0) {
@@ -273,8 +275,10 @@ export default function TaskForm({
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div>
+        <div className={`grid gap-4 ${readOnlyStatusOnly ? 'lg:grid-cols-1' : 'lg:grid-cols-3'}`}>
+          {!readOnlyStatusOnly ? (
+            <>
+              <div>
             <label htmlFor="taskAssignee" className="text-sm font-extrabold text-slate-800">
               Assignee <span className="text-rose-500">*</span>
             </label>
@@ -303,9 +307,9 @@ export default function TaskForm({
               })}
             </select>
             <FieldError>{assigneeError}</FieldError>
-          </div>
+              </div>
 
-          <div>
+              <div>
             <label htmlFor="taskPriority" className="text-sm font-extrabold text-slate-800">
               Priority <span className="text-rose-500">*</span>
             </label>
@@ -325,7 +329,9 @@ export default function TaskForm({
               ))}
             </select>
             <FieldError>{getFieldError(fieldErrors, 'priority')}</FieldError>
-          </div>
+              </div>
+            </>
+          ) : null}
 
           <div>
             <label htmlFor="taskStatus" className="text-sm font-extrabold text-slate-800">
@@ -352,21 +358,23 @@ export default function TaskForm({
           <label htmlFor="taskDueDate" className="text-sm font-extrabold text-slate-800">
             Due Date
           </label>
-          <div className="relative mt-2">
-            <input
-              id="taskDueDate"
-              name="due_date"
-              type="date"
-              min="2026-07-16"
-              value={formValues.due_date}
-              onChange={handleChange}
-              disabled={readOnlyStatusOnly}
-              className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#4b36f4] focus:ring-4 focus:ring-[#4b36f4]/10"
-            />
-            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">
-              <CalendarIcon />
-            </span>
-          </div>
+          {!readOnlyStatusOnly ? (
+            <div className="relative mt-2">
+              <input
+                id="taskDueDate"
+                name="due_date"
+                type="date"
+                min="2026-07-16"
+                value={formValues.due_date}
+                onChange={handleChange}
+                disabled={readOnlyStatusOnly}
+                className="h-12 w-full rounded-lg border border-slate-200 bg-white px-4 pr-12 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#4b36f4] focus:ring-4 focus:ring-[#4b36f4]/10"
+              />
+              <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">
+                <CalendarIcon />
+              </span>
+            </div>
+          ) : null}
           <FieldError>{getFieldError(fieldErrors, 'due_date')}</FieldError>
         </div>
       </div>

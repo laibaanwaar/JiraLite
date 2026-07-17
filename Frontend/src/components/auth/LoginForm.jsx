@@ -12,7 +12,7 @@ import PasswordInput from './PasswordInput.jsx'
 
 function MailIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
         d="M3.75 6.75h16.5v10.5H3.75V6.75Zm0 .75L12 13.5l8.25-6"
         fill="none"
@@ -27,7 +27,7 @@ function MailIcon() {
 
 function LockIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
         d="M7.5 10.5V8.25a4.5 4.5 0 1 1 9 0v2.25m-9 0h9v8.25h-9V10.5Z"
         fill="none"
@@ -73,6 +73,7 @@ export default function LoginForm() {
   const [submitError, setSubmitError] = useState('')
   const [submitSuccess, setSubmitSuccess] = useState(initialNotice?.type === 'warning' ? '' : initialNotice?.message || '')
   const [submitWarning, setSubmitWarning] = useState(initialNotice?.type === 'warning' ? initialNotice?.message || '' : '')
+  const [verificationEmail, setVerificationEmail] = useState('')
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -114,6 +115,7 @@ export default function LoginForm() {
     setSubmitError('')
     setSubmitSuccess('')
     setSubmitWarning('')
+    setVerificationEmail('')
 
     if (!validate()) {
       return
@@ -154,9 +156,15 @@ export default function LoginForm() {
           password: Array.isArray(responseData.password) ? responseData.password[0] : '',
         }
         const firstError = Object.values(responseData).flat().find(Boolean)
+        const safeError = firstError || responseData.message || fallbackMessage
+        const isUnverifiedEmailError = String(safeError).toLowerCase().includes('verif')
 
         setFieldErrors(nextFieldErrors)
-        setSubmitError(firstError || responseData.message || fallbackMessage)
+        setSubmitError(safeError)
+        if (isUnverifiedEmailError) {
+          setVerificationEmail(formValues.email.trim())
+          sessionStorage.setItem('signupEmail', formValues.email.trim())
+        }
         return
       }
 
@@ -167,7 +175,7 @@ export default function LoginForm() {
   }
 
   return (
-    <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+    <form className="flex flex-col gap-4 [@media(max-height:760px)]:gap-3.5" onSubmit={handleSubmit}>
       <FormInput
         id="loginEmail"
         name="email"
@@ -197,15 +205,15 @@ export default function LoginForm() {
         required
       />
 
-      <div className="flex items-center justify-between gap-4 text-[0.95rem]">
-        <label className="flex items-center gap-2.5 font-semibold text-slate-500" htmlFor="rememberMe">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <label className="flex items-center gap-2 font-semibold text-slate-500" htmlFor="rememberMe">
           <input
             id="rememberMe"
             name="rememberMe"
             type="checkbox"
             checked={rememberMe}
             onChange={(event) => setRememberMe(event.target.checked)}
-            className="h-[18px] w-[18px] accent-[#3260ff]"
+            className="h-4 w-4 accent-[#061A43]"
           />
           Remember me
         </label>
@@ -220,7 +228,7 @@ export default function LoginForm() {
 
       {submitError ? (
         <p
-          className="mt-[-4px] rounded-xl border border-rose-300/50 bg-rose-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-rose-700"
+          className="mt-[-4px] rounded-lg border border-rose-300/50 bg-rose-50/90 px-3.5 py-2.5 text-sm leading-6 text-rose-700"
           role="alert"
         >
           {submitError}
@@ -229,7 +237,7 @@ export default function LoginForm() {
 
       {submitSuccess ? (
         <p
-          className="mt-[-4px] rounded-xl border border-emerald-300/50 bg-emerald-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-emerald-700"
+          className="mt-[-4px] rounded-lg border border-emerald-300/50 bg-emerald-50/90 px-3.5 py-2.5 text-sm leading-6 text-emerald-700"
           role="status"
         >
           {submitSuccess}
@@ -238,23 +246,33 @@ export default function LoginForm() {
 
       {submitWarning ? (
         <p
-          className="mt-[-4px] rounded-xl border border-amber-300/50 bg-amber-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-amber-800"
+          className="mt-[-4px] rounded-lg border border-amber-300/50 bg-amber-50/90 px-3.5 py-2.5 text-sm leading-6 text-amber-800"
           role="status"
         >
           {submitWarning}
         </p>
       ) : null}
 
+      {verificationEmail ? (
+        <button
+          type="button"
+          className="mt-[-4px] min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          onClick={() => navigateTo('/verify-otp', { state: { email: verificationEmail } })}
+        >
+          Verify Email
+        </button>
+      ) : null}
+
       <button
         type="submit"
-        className="min-h-[58px] rounded-xl border-0 bg-linear-to-r from-[#4030e8] via-[#4b36f4] to-[#3827d9] text-[1.05rem] font-bold text-white shadow-[0_16px_26px_rgba(64,48,232,0.26)] transition duration-150 hover:enabled:-translate-y-px hover:enabled:shadow-[0_20px_30px_rgba(64,48,232,0.3)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(64,48,232,0.28)] active:enabled:translate-y-0 active:enabled:shadow-[0_12px_22px_rgba(64,48,232,0.24)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
+        className="min-h-11 rounded-lg border-0 bg-[#061A43] px-4 text-sm font-bold text-white shadow-sm transition duration-150 hover:enabled:bg-[#0B2457] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(37,99,235,0.28)] disabled:cursor-not-allowed disabled:opacity-55"
         disabled={isSubmitting}
       >
         {isSubmitting ? 'Logging in...' : 'Login'}
       </button>
 
-      <p className="m-0 pt-3 text-center text-base font-semibold text-slate-500">
-        Do not have an account?{' '}
+      <p className="m-0 border-t border-slate-200 pt-4 text-center text-sm font-semibold text-slate-500 [@media(max-height:760px)]:pt-3">
+        Don&apos;t have an account?{' '}
         <a
           href="/signup"
           onClick={navigateToSignup}

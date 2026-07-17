@@ -85,7 +85,12 @@ export default function TaskTable({
                     </button>
                   </td>
                   <td className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-600" onClick={() => onView(task)}>{projectName}</td>
-                  <td className="cursor-pointer px-5 py-4" onClick={() => onView(task)}><TaskStatusBadge status={task.status} /></td>
+                  <td
+                    className="cursor-pointer px-5 py-4"
+                    onClick={() => (isAssignedToCurrentUser ? onUpdateStatus?.(task) : onView?.(task))}
+                  >
+                    <TaskStatusBadge status={task.status} />
+                  </td>
                   <td className="cursor-pointer px-5 py-4" onClick={() => onView(task)}><TaskPriorityBadge priority={task.priority} /></td>
                   <td className="cursor-pointer px-5 py-4" onClick={() => onView(task)}>
                     <div className="flex items-center gap-3">
@@ -121,15 +126,7 @@ export default function TaskTable({
                       >
                         View
                       </button>
-                      {isAssignedToCurrentUser ? (
-                        <button
-                          type="button"
-                          onClick={() => onUpdateStatus(task)}
-                          className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-                        >
-                          Update Status
-                        </button>
-                      ) : null}
+                      {/* Update Status handled by clicking the status badge for assignees */}
                       {isManager ? (
                         <button
                           type="button"

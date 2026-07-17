@@ -6,7 +6,7 @@ import PasswordInput from './PasswordInput.jsx'
 
 function UserIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
         d="M12 12a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5Zm-6.75 7.5a6.75 6.75 0 0 1 13.5 0"
         fill="none"
@@ -21,7 +21,7 @@ function UserIcon() {
 
 function MailIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
         d="M3.75 6.75h16.5v10.5H3.75V6.75Zm0 .75L12 13.5l8.25-6"
         fill="none"
@@ -36,7 +36,7 @@ function MailIcon() {
 
 function LockIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
         d="M7.5 10.5V8.25a4.5 4.5 0 1 1 9 0v2.25m-9 0h9v8.25h-9V10.5Z"
         fill="none"
@@ -55,6 +55,17 @@ function isValidEmail(value) {
 
 function isStrongPassword(value) {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(String(value || ''))
+}
+
+function getSignupResponseEmail(responseData, fallbackEmail) {
+  return String(
+    responseData?.data?.email ||
+      responseData?.data?.user?.email ||
+      responseData?.user?.email ||
+      responseData?.email ||
+      fallbackEmail ||
+      '',
+  ).trim()
 }
 
 export default function SignupForm() {
@@ -157,14 +168,15 @@ export default function SignupForm() {
     setIsSubmitting(true)
 
     try {
-      await signupAdmin(signupPayload)
-      sessionStorage.setItem('signupEmail', signupPayload.email)
+      const responseData = await signupAdmin(signupPayload)
+      const verificationEmail = getSignupResponseEmail(responseData, signupPayload.email)
+
+      sessionStorage.setItem('signupEmail', verificationEmail)
       setSubmitSuccess('Your admin account has been created successfully.')
-      navigateTo('/login', {
+      navigateTo('/verify-otp', {
         replace: true,
         state: {
-          message: 'Your admin account has been created successfully. Please log in.',
-          prefillEmail: signupPayload.email,
+          email: verificationEmail,
         },
       })
     } catch (error) {
@@ -184,10 +196,13 @@ export default function SignupForm() {
           password: Array.isArray(responseData.password) ? responseData.password[0] : '',
           confirmPassword: Array.isArray(responseData.confirm_password) ? responseData.confirm_password[0] : '',
         }
+        const nonFieldError = Array.isArray(responseData.non_field_errors)
+          ? responseData.non_field_errors[0]
+          : responseData.non_field_errors || ''
         const firstError = Object.values(responseData).flat().find(Boolean)
 
         setFieldErrors(nextFieldErrors)
-        setSubmitError(firstError || responseData.message || fallbackMessage)
+        setSubmitError(nonFieldError || firstError || responseData.message || fallbackMessage)
         return
       }
 
@@ -198,8 +213,8 @@ export default function SignupForm() {
   }
 
   return (
-    <form className="flex flex-col gap-[18px]" onSubmit={handleSubmit}>
-      <div className="grid gap-[18px] md:grid-cols-2">
+    <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
+      <div className="grid gap-3.5 sm:grid-cols-2">
         <FormInput
           id="firstName"
           name="firstName"
@@ -270,7 +285,7 @@ export default function SignupForm() {
         required
       />
 
-      <label className="flex items-start gap-3 text-[0.95rem] leading-[1.55] text-slate-500 max-[480px]:gap-2.5 max-[480px]:text-[0.92rem]" htmlFor="terms">
+      <label className="flex items-start gap-2.5 text-xs leading-5 text-slate-500" htmlFor="terms">
         <input
           id="terms"
           name="terms"
@@ -283,7 +298,7 @@ export default function SignupForm() {
               terms: '',
             }))
           }}
-          className="mt-0.5 h-[18px] w-[18px] accent-[#3260ff]"
+          className="mt-0.5 h-4 w-4 accent-[#061A43]"
         />
         <span>
           I agree to the{' '}
@@ -304,11 +319,11 @@ export default function SignupForm() {
         </span>
       </label>
 
-      {fieldErrors.terms ? <p className="mt-[-8px] text-sm font-semibold text-rose-600">{fieldErrors.terms}</p> : null}
+      {fieldErrors.terms ? <p className="mt-[-8px] text-xs font-semibold text-rose-600">{fieldErrors.terms}</p> : null}
 
       {submitError ? (
         <p
-          className="mt-[-4px] rounded-xl border border-rose-300/50 bg-rose-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-rose-700"
+          className="mt-[-4px] rounded-lg border border-rose-300/50 bg-rose-50/90 px-3.5 py-2.5 text-sm leading-6 text-rose-700"
           role="alert"
         >
           {submitError}
@@ -317,7 +332,7 @@ export default function SignupForm() {
 
       {submitSuccess ? (
         <p
-          className="mt-[-4px] rounded-xl border border-emerald-300/50 bg-emerald-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-emerald-700"
+          className="mt-[-4px] rounded-lg border border-emerald-300/50 bg-emerald-50/90 px-3.5 py-2.5 text-sm leading-6 text-emerald-700"
           role="status"
         >
           {submitSuccess}
@@ -326,19 +341,13 @@ export default function SignupForm() {
 
       <button
         type="submit"
-        className="min-h-[58px] rounded-xl border-0 bg-linear-to-r from-[#2659ff] via-[#3467ff] to-[#2554f6] text-[1.05rem] font-bold text-white shadow-[0_16px_26px_rgba(47,87,255,0.28)] transition duration-150 hover:enabled:-translate-y-px hover:enabled:shadow-[0_20px_30px_rgba(47,87,255,0.32)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(61,104,255,0.28)] active:enabled:translate-y-0 active:enabled:shadow-[0_12px_22px_rgba(47,87,255,0.24)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
+        className="min-h-10 rounded-lg border-0 bg-[#061A43] px-4 text-sm font-bold text-white shadow-sm transition duration-150 hover:enabled:bg-[#0B2457] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(37,99,235,0.28)] disabled:cursor-not-allowed disabled:opacity-55"
         disabled={isSubmitting}
       >
-        {isSubmitting ? 'Creating Account...' : 'Sign Up'}
+        {isSubmitting ? 'Creating Account...' : 'Create Account'}
       </button>
 
-      <div className="flex items-center gap-3.5 text-[0.95rem] text-slate-400" aria-hidden="true">
-        <span className="h-px flex-1 bg-[linear-gradient(90deg,rgba(211,221,242,0.18)_0%,rgba(211,221,242,1)_50%,rgba(211,221,242,0.18)_100%)]" />
-        <p className="m-0">or</p>
-        <span className="h-px flex-1 bg-[linear-gradient(90deg,rgba(211,221,242,0.18)_0%,rgba(211,221,242,1)_50%,rgba(211,221,242,0.18)_100%)]" />
-      </div>
-
-      <p className="m-0 text-center text-base text-slate-500">
+      <p className="m-0 pt-0.5 text-center text-xs text-slate-500">
         Already have an account?{' '}
         <a
           href="/login"

@@ -1,59 +1,22 @@
-import { useState } from 'react'
-import FormInput from './FormInput.jsx'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { resendVerification, verifyEmail } from '../../services/authService.js'
+import { navigateTo } from '../../utils/navigation.js'
 
-function MailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
-      <path
-        d="M3.75 6.75h16.5v10.5H3.75V6.75Zm0 .75L12 13.5l8.25-6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function ShieldIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
-      <path
-        d="M12 3.75 5.25 6v5.25c0 4.2 2.85 7.95 6.75 9 3.9-1.05 6.75-4.8 6.75-9V6L12 3.75Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function ArrowLeftIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <path
-        d="M19.5 12h-15m0 0 6-6m-6 6 6 6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
+const OTP_LENGTH = 6
+const RESEND_COOLDOWN_SECONDS = 60
 
 function getInitialEmail() {
-  return window.history.state?.email || sessionStorage.getItem('signupEmail') || ''
+  return String(window.history.state?.email || sessionStorage.getItem('signupEmail') || '').trim()
 }
 
-function navigateTo(path, state = {}) {
-  window.history.pushState(state, '', path)
-  window.dispatchEvent(new PopStateEvent('popstate'))
+function maskEmail(email) {
+  const [name = '', domain = ''] = String(email).split('@')
+
+  if (!name || !domain) {
+    return email
+  }
+
+  return `${name.charAt(0)}${name.length > 1 ? '***' : ''}@${domain}`
 }
 
 function getSafeErrorMessage(responseData, fallbackMessage) {
@@ -65,25 +28,23 @@ function getSafeErrorMessage(responseData, fallbackMessage) {
     return fallbackMessage
   }
 
-  if (typeof responseData.message === 'string' && responseData.message.trim()) {
-    return responseData.message
-  }
-
-  if (typeof responseData.detail === 'string' && responseData.detail.trim()) {
-    return responseData.detail
-  }
-
-  const prioritizedMessages = [
+  const candidates = [
+    responseData.message,
+    responseData.detail,
     responseData.code?.[0],
+    responseData.otp?.[0],
     responseData.email?.[0],
+    responseData.non_field_errors?.[0],
     responseData.errors?.code?.[0],
+    responseData.errors?.otp?.[0],
     responseData.errors?.email?.[0],
+    responseData.errors?.non_field_errors?.[0],
   ]
 
-  const prioritizedMessage = prioritizedMessages.find((value) => typeof value === 'string' && value.trim())
+  const directMessage = candidates.find((value) => typeof value === 'string' && value.trim())
 
-  if (prioritizedMessage) {
-    return prioritizedMessage
+  if (directMessage) {
+    return directMessage
   }
 
   if (responseData.errors && typeof responseData.errors === 'object') {
@@ -96,145 +57,244 @@ function getSafeErrorMessage(responseData, fallbackMessage) {
     }
   }
 
-  const firstTopLevelString = Object.values(responseData).find(
-    (value) => typeof value === 'string' && value.trim(),
-  )
+  const firstTopLevelString = Object.values(responseData)
+    .flat()
+    .find((value) => typeof value === 'string' && value.trim())
 
   return firstTopLevelString || fallbackMessage
 }
 
+function normalizeVerificationError(message) {
+  const normalized = String(message || '').toLowerCase()
+
+  if (normalized.includes('expired')) {
+    return 'This verification code has expired. Request a new code.'
+  }
+
+  if (normalized.includes('already') && normalized.includes('verified')) {
+    return 'Your email is already verified. Please log in.'
+  }
+
+  if (normalized.includes('too many') || normalized.includes('throttle') || normalized.includes('rate')) {
+    return 'Too many verification attempts. Please wait and try again.'
+  }
+
+  if (normalized.includes('invalid') || normalized.includes('incorrect')) {
+    return 'The verification code is incorrect.'
+  }
+
+  return message || 'Email verification failed. Please check the code and try again.'
+}
+
 export default function VerifyEmailForm() {
-  const [formValues, setFormValues] = useState({
-    email: getInitialEmail(),
-    code: '',
-  })
+  const email = useMemo(() => getInitialEmail(), [])
+  const maskedEmail = maskEmail(email)
+  const inputRefs = useRef([])
+  const [digits, setDigits] = useState(() => Array(OTP_LENGTH).fill(''))
+  const [cooldown, setCooldown] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isResending, setIsResending] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [submitSuccess, setSubmitSuccess] = useState('')
 
-  const handleChange = (event) => {
-    const { name, value } = event.target
+  const otp = digits.join('')
+  const isOtpComplete = otp.length === OTP_LENGTH && digits.every(Boolean)
 
-    setFormValues((currentValues) => ({
-      ...currentValues,
-      [name]: value,
-    }))
+  useEffect(() => {
+    if (!cooldown) {
+      return undefined
+    }
+
+    const timerId = window.setInterval(() => {
+      setCooldown((currentCooldown) => Math.max(currentCooldown - 1, 0))
+    }, 1000)
+
+    return () => window.clearInterval(timerId)
+  }, [cooldown])
+
+  const clearOtp = () => {
+    setDigits(Array(OTP_LENGTH).fill(''))
+    window.setTimeout(() => {
+      inputRefs.current[0]?.focus()
+    }, 0)
   }
 
-  const navigateToLogin = () => {
-    navigateTo('/login')
+  const handleDigitChange = (index, value) => {
+    const numericValue = value.replace(/\D/g, '')
+
+    if (!numericValue) {
+      setDigits((currentDigits) => {
+        const nextDigits = [...currentDigits]
+        nextDigits[index] = ''
+        return nextDigits
+      })
+      return
+    }
+
+    const nextValues = numericValue.slice(0, OTP_LENGTH - index).split('')
+
+    setDigits((currentDigits) => {
+      const nextDigits = [...currentDigits]
+
+      nextValues.forEach((digit, digitIndex) => {
+        nextDigits[index + digitIndex] = digit
+      })
+
+      return nextDigits
+    })
+
+    const nextIndex = Math.min(index + nextValues.length, OTP_LENGTH - 1)
+    inputRefs.current[nextIndex]?.focus()
   }
 
-  const handleSubmit = (event) => {
+  const handleKeyDown = (index, event) => {
+    if (event.key !== 'Backspace' || digits[index]) {
+      return
+    }
+
+    inputRefs.current[Math.max(index - 1, 0)]?.focus()
+  }
+
+  const handlePaste = (event) => {
+    event.preventDefault()
+    const pastedDigits = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, OTP_LENGTH)
+
+    if (!pastedDigits) {
+      return
+    }
+
+    setDigits([
+      ...pastedDigits.split(''),
+      ...Array(Math.max(OTP_LENGTH - pastedDigits.length, 0)).fill(''),
+    ])
+
+    inputRefs.current[Math.min(pastedDigits.length, OTP_LENGTH) - 1]?.focus()
+  }
+
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (isSubmitting) {
+    if (isSubmitting || !email || !isOtpComplete) {
       return
     }
 
     setSubmitError('')
     setSubmitSuccess('')
-
-    const trimmedEmail = formValues.email.trim()
-    const trimmedCode = formValues.code.trim()
-
-    if (!trimmedEmail) {
-      setSubmitError('Email address is required.')
-      return
-    }
-
-    if (!trimmedCode) {
-      setSubmitError('Verification code is required.')
-      return
-    }
-
-    const verificationPayload = {
-      email: trimmedEmail,
-      code: trimmedCode,
-    }
-
     setIsSubmitting(true)
 
-    verifyEmail(verificationPayload)
-      .then((responseData) => {
-        sessionStorage.removeItem('signupEmail')
-        navigateTo('/login', {
+    try {
+      const responseData = await verifyEmail({
+        email,
+        code: otp,
+      })
+
+      sessionStorage.removeItem('signupEmail')
+      setSubmitSuccess('Email verified successfully.')
+      navigateTo('/login', {
+        replace: true,
+        state: {
           message: getSafeErrorMessage(responseData, 'Email verified successfully. Please log in.'),
-        })
+          prefillEmail: email,
+        },
       })
-      .catch((error) => {
-        const fallbackMessage = 'Email verification failed. Please check the code and try again.'
-        const responseData = error?.response?.data
+    } catch (error) {
+      const fallbackMessage = 'Email verification failed. Please check the code and try again.'
+      const responseData = error?.response?.data
+      const safeMessage = normalizeVerificationError(getSafeErrorMessage(responseData, fallbackMessage))
 
-        if (import.meta.env.DEV) {
-          console.error('verify-email error response:', responseData)
-        }
-
-        setSubmitError(getSafeErrorMessage(responseData, fallbackMessage))
-      })
-      .finally(() => {
-        setIsSubmitting(false)
-      })
+      setSubmitError(safeMessage)
+      clearOtp()
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  const handleBackToLogin = (event) => {
-    event.preventDefault()
-    navigateToLogin()
-  }
+  const handleResendVerification = async () => {
+    if (!email || isResending || cooldown > 0) {
+      return
+    }
 
-  const handleResendVerification = () => {
     setSubmitError('')
     setSubmitSuccess('')
     setIsResending(true)
 
-    resendVerification({ email: formValues.email.trim() })
-      .then(() => {
-        setSubmitSuccess('Verification email sent.')
-      })
-      .catch((error) => {
-        const fallbackMessage = 'Unable to resend verification email right now.'
-        const responseData = error?.response?.data
-        setSubmitError(getSafeErrorMessage(responseData, fallbackMessage))
-      })
-      .finally(() => {
-        setIsResending(false)
-      })
+    try {
+      await resendVerification({ email })
+      setSubmitSuccess('A new verification code has been sent.')
+      setCooldown(RESEND_COOLDOWN_SECONDS)
+      clearOtp()
+    } catch (error) {
+      const fallbackMessage = 'Unable to resend verification code right now.'
+      setSubmitError(getSafeErrorMessage(error?.response?.data, fallbackMessage))
+    } finally {
+      setIsResending(false)
+    }
   }
 
-  const handleResendPageNavigation = (event) => {
-    event.preventDefault()
-    navigateTo('/resend-verification', { email: formValues.email.trim() || formValues.email })
+  const handleBackToSignup = () => {
+    sessionStorage.removeItem('signupEmail')
+    navigateTo('/signup')
+  }
+
+  if (!email) {
+    return (
+      <div className="text-center">
+        <h1 id="verify-email-title" className="m-0 text-2xl font-extrabold leading-tight text-[#061A43]">
+          No pending verification
+        </h1>
+        <p className="mt-3 text-sm font-medium leading-6 text-slate-500">
+          No pending email verification was found. Please sign up again to request a new code.
+        </p>
+        <button
+          type="button"
+          className="mt-5 min-h-11 w-full rounded-lg border-0 bg-[#061A43] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#0B2457] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(37,99,235,0.28)]"
+          onClick={handleBackToSignup}
+        >
+          Back to Signup
+        </button>
+      </div>
+    )
   }
 
   return (
-    <form className="flex flex-col gap-6" onSubmit={handleSubmit}>
-      <FormInput
-        id="verificationEmail"
-        name="email"
-        label="Email Address"
-        type="email"
-        value={formValues.email}
-        onChange={handleChange}
-        placeholder="Enter your email address"
-        autoComplete="email"
-        icon={<MailIcon />}
-      />
+    <form className="flex flex-col gap-4 [@media(max-height:760px)]:gap-3.5" onSubmit={handleSubmit}>
+      <div className="text-center">
+        <h1 id="verify-email-title" className="m-0 text-2xl font-extrabold leading-tight text-[#061A43]">
+          Verify your email
+        </h1>
+        <p className="mt-2 text-sm font-medium leading-6 text-slate-500">
+          Enter the verification code sent to <span className="font-extrabold text-slate-700">{maskedEmail}</span>.
+        </p>
+      </div>
 
-      <FormInput
-        id="verificationCode"
-        name="code"
-        label="Verification Code"
-        value={formValues.code}
-        onChange={handleChange}
-        placeholder="Paste or enter your verification code"
-        autoComplete="one-time-code"
-        icon={<ShieldIcon />}
-      />
+      <fieldset className="border-0 p-0">
+        <legend className="sr-only">Verification code</legend>
+        <div className="flex justify-center gap-2.5">
+          {digits.map((digit, index) => (
+            <input
+              aria-label={`Verification code digit ${index + 1}`}
+              autoComplete={index === 0 ? 'one-time-code' : 'off'}
+              className="h-11 w-10 rounded-lg border border-slate-300 bg-white text-center text-lg font-extrabold text-slate-900 outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100 sm:w-11"
+              inputMode="numeric"
+              key={`otp-${index}`}
+              maxLength={1}
+              onChange={(event) => handleDigitChange(index, event.target.value)}
+              onKeyDown={(event) => handleKeyDown(index, event)}
+              onPaste={handlePaste}
+              pattern="[0-9]*"
+              ref={(element) => {
+                inputRefs.current[index] = element
+              }}
+              type="text"
+              value={digit}
+            />
+          ))}
+        </div>
+      </fieldset>
 
       {submitError ? (
         <p
-          className="mt-[-6px] rounded-xl border border-rose-300/50 bg-rose-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-rose-700"
+          className="rounded-lg border border-rose-300/50 bg-rose-50/90 px-3.5 py-2.5 text-sm leading-6 text-rose-700"
           role="alert"
         >
           {submitError}
@@ -243,7 +303,7 @@ export default function VerifyEmailForm() {
 
       {submitSuccess ? (
         <p
-          className="mt-[-6px] rounded-xl border border-emerald-300/50 bg-emerald-50/90 px-3.5 py-3 text-[0.94rem] leading-[1.45] text-emerald-700"
+          className="rounded-lg border border-emerald-300/50 bg-emerald-50/90 px-3.5 py-2.5 text-sm leading-6 text-emerald-700"
           role="status"
         >
           {submitSuccess}
@@ -252,47 +312,30 @@ export default function VerifyEmailForm() {
 
       <button
         type="submit"
-        className="min-h-[58px] rounded-xl border-0 bg-linear-to-r from-[#2659ff] via-[#3467ff] to-[#2554f6] text-[1.05rem] font-bold text-white shadow-[0_16px_26px_rgba(47,87,255,0.28)] transition duration-150 hover:enabled:-translate-y-px hover:enabled:shadow-[0_20px_30px_rgba(47,87,255,0.32)] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(61,104,255,0.28)] active:enabled:translate-y-0 active:enabled:shadow-[0_12px_22px_rgba(47,87,255,0.24)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
-        disabled={isSubmitting || !formValues.email.trim() || !formValues.code.trim()}
+        className="min-h-11 rounded-lg border-0 bg-[#061A43] px-4 text-sm font-bold text-white shadow-sm transition hover:enabled:bg-[#0B2457] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[rgba(37,99,235,0.28)] disabled:cursor-not-allowed disabled:opacity-55"
+        disabled={isSubmitting || !isOtpComplete}
       >
-        {isSubmitting ? 'Verifying...' : 'Verify Email'}
+        {isSubmitting ? 'Verifying...' : 'Verify OTP'}
       </button>
 
-      <p className="m-0 text-center text-[0.95rem] text-slate-500">
-        Did not receive the email?{' '}
+      <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 text-center text-sm font-semibold text-slate-500">
         <button
           type="button"
           onClick={handleResendVerification}
-          disabled={isResending || !formValues.email.trim()}
-          className="font-semibold text-blue-600 no-underline hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-blue-500"
+          disabled={isResending || cooldown > 0}
+          className="text-blue-600 no-underline hover:enabled:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-blue-500 disabled:cursor-not-allowed disabled:text-slate-400"
         >
-          {isResending ? 'Sending...' : 'Resend verification'}
+          {isResending ? 'Sending...' : cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend OTP'}
         </button>
-      </p>
 
-      <p className="m-0 text-center text-[0.95rem] text-slate-500">
-        Need the full resend page?{' '}
-        <a
-          href="/resend-verification"
-          onClick={handleResendPageNavigation}
-          className="font-semibold text-blue-600 no-underline hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-blue-500"
+        <button
+          type="button"
+          onClick={handleBackToSignup}
+          className="text-blue-600 no-underline hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-blue-500"
         >
-          Open resend form
-        </a>
-      </p>
-
-      <div className="h-px bg-[linear-gradient(90deg,rgba(211,221,242,0.18)_0%,rgba(211,221,242,1)_50%,rgba(211,221,242,0.18)_100%)]" />
-
-      <p className="m-0 text-center">
-        <a
-          href="/login"
-          onClick={handleBackToLogin}
-          className="inline-flex items-center gap-2 font-semibold text-blue-600 no-underline hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-blue-500"
-        >
-          <ArrowLeftIcon />
-          Back to Login
-        </a>
-      </p>
+          Change email
+        </button>
+      </div>
     </form>
   )
 }

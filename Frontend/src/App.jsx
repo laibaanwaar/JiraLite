@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute, StrictAdminRoute } from './components/routes/ProtectedRoute.jsx'
 import useAuth from './hooks/useAuth.js'
+import HomePage from './pages/HomePage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import ProjectInvitationResponsePage from './pages/ProjectInvitationResponsePage.jsx'
@@ -52,17 +53,12 @@ export default function App() {
   const taskDetailMatch = pathname.match(/^\/tasks\/(\d+)$/)
   const taskEditMatch = pathname.match(/^\/tasks\/(\d+)\/edit$/)
 
-  if (pathname === '/' || pathname === '/signup') {
-    if (isAuthenticated && pathname === '/') {
-      navigateTo(dashboardPath, { replace: true })
-      return null
-    }
+  if (pathname === '/') {
+    return <HomePage />
+  }
 
-    return (
-      <PublicOnlyRoute>
-        <SignupPage />
-      </PublicOnlyRoute>
-    )
+  if (pathname === '/signup') {
+    return <SignupPage />
   }
 
   if (pathname === '/login') {
@@ -73,7 +69,7 @@ export default function App() {
     )
   }
 
-  if (pathname === '/verify-email') {
+  if (pathname === '/verify-email' || pathname === '/verify-otp') {
     return <VerifyEmailPage />
   }
 
