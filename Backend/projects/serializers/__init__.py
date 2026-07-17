@@ -9,6 +9,7 @@ from .create_task_serializer import CreateTaskSerializer
 from .task_list_serializer import TaskListSerializer
 from .task_serializer import TaskSerializer
 from .task_comment_serializer import CreateTaskCommentSerializer, TaskCommentSerializer, UpdateTaskCommentSerializer
+from .task_status_serializer import TaskStatusResponseSerializer, TaskStatusUpdateSerializer
 from .update_task_serializer import UpdateTaskSerializer
 from .update_project_serializer import UpdateProjectSerializer
 
@@ -26,6 +27,8 @@ __all__ = [
     "CreateTaskCommentSerializer",
     "TaskCommentSerializer",
     "UpdateTaskCommentSerializer",
+    "TaskStatusResponseSerializer",
+    "TaskStatusUpdateSerializer",
     "UpdateTaskSerializer",
     "UpdateProjectSerializer",
 ]

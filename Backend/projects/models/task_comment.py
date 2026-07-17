@@ -22,7 +22,7 @@ class TaskComment(models.Model):
     class Meta:
         ordering = ["created_at", "id"]
         indexes = [
-            models.Index(fields=["task", "created_at"], name="projects_tc_task_cre_9d2f9a_idx"),
+            models.Index(fields=["task", "created_at"], name="projects_tc_task_cr_9d2f9a_idx"),
             models.Index(fields=["author"], name="projects_tc_author_39fba5_idx"),
         ]
 

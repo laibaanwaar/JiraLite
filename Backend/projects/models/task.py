@@ -45,8 +45,16 @@ class Task(models.Model):
         on_delete=models.CASCADE,
         related_name="created_tasks",
     )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_tasks",
+    )
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default=PRIORITY_MEDIUM)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_TO_DO)
+    completed_at = models.DateTimeField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

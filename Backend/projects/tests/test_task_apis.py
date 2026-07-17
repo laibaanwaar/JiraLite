@@ -386,16 +386,16 @@ class TaskApiTests(APITestCase):
         self.assertEqual(self.task.title, "Create Auth API")
         self.assertEqual(self.task.assignee_id, self.admin_membership.id)
 
-    def test_member_cannot_update_own_task_status(self):
+    def test_member_can_update_own_task_status(self):
         self.authenticate(self.member)
         response = self.client.patch(
             self.task_detail_url,
             {"status": Task.STATUS_IN_PROGRESS},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.task.refresh_from_db()
-        self.assertEqual(self.task.status, Task.STATUS_TO_DO)
+        self.assertEqual(self.task.status, Task.STATUS_IN_PROGRESS)
 
     def test_member_cannot_update_own_title(self):
         self.authenticate(self.member)

@@ -3,5 +3,6 @@ from .project_invitation import ProjectInvitation
 from .project_member import ProjectMember
 from .task import Task
 from .task_comment import TaskComment
+from .task_status_history import TaskStatusHistory
 
-__all__ = ["Project", "ProjectInvitation", "ProjectMember", "Task", "TaskComment"]
+__all__ = ["Project", "ProjectInvitation", "ProjectMember", "Task", "TaskComment", "TaskStatusHistory"]

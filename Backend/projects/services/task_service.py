@@ -241,9 +241,11 @@ class TaskService:
 
             membership = TaskService._get_membership(user=user, project=task.project)
             if membership.role not in TaskService.ADMIN_ROLES:
-                raise TaskPermissionError("You do not have permission to update this task.")
-
-            allowed_fields = {"title", "description", "assignee_id", "priority", "status", "due_date"}
+                if task.assignee.user_id != user.id:
+                    raise TaskPermissionError("You do not have permission to update this task.")
+                allowed_fields = {"status"}
+            else:
+                allowed_fields = {"title", "description", "assignee_id", "priority", "status", "due_date"}
 
             invalid_fields = sorted(set(validated_data.keys()) - allowed_fields)
             if invalid_fields:
