@@ -25,7 +25,49 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config("DEBUG", cast=bool)
+def _read_bool(name: str, default: bool = False) -> bool:
+    """
+    Read a boolean-like environment value safely.
+
+    python-decouple's bool casting raises on values like "release",
+    so we normalize a few common deployment strings here instead of
+    crashing during settings import.
+    """
+
+    raw_value = config(name, default=default)
+
+    if isinstance(raw_value, bool):
+        return raw_value
+
+    value = str(raw_value).strip().lower()
+
+    if value in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+
+    if value in {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}:
+        return False
+
+    return default
+
+
+def _read_text(name: str, default: str = "") -> str:
+    """
+    Read a text environment value safely.
+
+    Blank values fall back to the provided default so a set-but-empty
+    env var does not disable a required URL configuration.
+    """
+
+    raw_value = config(name, default=default)
+
+    if raw_value is None:
+        return default
+
+    value = str(raw_value).strip()
+    return value or default
+
+
+DEBUG = _read_bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -55,10 +97,13 @@ INSTALLED_APPS = [
 
     # Local Apps
     'accounts.apps.AccountsConfig',
+    'dashboard.apps.DashboardConfig',
     'projects.apps.ProjectsConfig',
     'tasks.apps.TasksConfig',
 ]
+
 AUTH_USER_MODEL = "accounts.User"
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -113,10 +158,6 @@ AUTH_PASSWORD_VALIDATORS = [
         'OPTIONS': {'min_length': 12},
     },
     {
-        'NAME': 'accounts.password_validation.MaximumLengthPasswordValidator',
-        'OPTIONS': {'max_length': 64},
-    },
-    {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
     },
     {
@@ -150,12 +191,15 @@ CORS_ALLOW_ALL_ORIGINS = True
 # Django REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "accounts.authentication.VerifiedJWTAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/minute",
+    },
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(hours=24),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -166,16 +210,16 @@ EMAIL_VERIFICATION_OTP_EXPIRY_MINUTES = config(
     default=10,
     cast=int,
 )
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="no-reply@jiralite.local")
-EMAIL_BACKEND = config(
-    "EMAIL_BACKEND",
-    default="django.core.mail.backends.locmem.EmailBackend",
+DEFAULT_FROM_EMAIL = _read_text(
+    "DEFAULT_FROM_EMAIL",
+    default="no-reply@jiralite.local",
 )
-EMAIL_HOST = config("EMAIL_HOST", default="localhost")
-EMAIL_PORT = config("EMAIL_PORT", default=25, cast=int)
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = config("EMAIL_HOST", default="smtp.gmail.com")
+EMAIL_PORT = config("EMAIL_PORT", default=587, cast=int)
 EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
-EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=False, cast=bool)
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
 EMAIL_USE_SSL = config("EMAIL_USE_SSL", default=False, cast=bool)
 EMAIL_TIMEOUT = config("EMAIL_TIMEOUT", default=None, cast=int)
 RESEND_VERIFICATION_COOLDOWN_SECONDS = config(
@@ -222,11 +266,11 @@ BACKEND_BASE_URL = config(
     "BACKEND_BASE_URL",
     default="http://127.0.0.1:8000",
 )
-FRONTEND_URL = config(
+FRONTEND_URL = _read_text(
     "FRONTEND_URL",
-    default="",
+    default="http://127.0.0.1:5173",
 )
-FRONTEND_ACCEPT_INVITATION_URL = config(
+FRONTEND_ACCEPT_INVITATION_URL = _read_text(
     "FRONTEND_ACCEPT_INVITATION_URL",
-    default="",
+    default="http://127.0.0.1:5173/invitations/respond",
 )

@@ -1,41 +1,51 @@
+from typing import Any
+
 from django.contrib.auth.base_user import BaseUserManager
 
 
 class UserManager(BaseUserManager):
-    use_in_migrations = True
+    """Manager for an email-based Django user model."""
 
-    def normalize_email_value(self, email: str) -> str:
-        return (email or "").strip().lower()
-
-    def _create_user(self, email: str, password: str, **extra_fields):
-        from accounts.models import Role
-
+    def create_user(
+        self,
+        email: str,
+        password: str | None = None,
+        **extra_fields: Any,
+    ):
         if not email:
-            raise ValueError("The email field must be set.")
+            raise ValueError("Email address is required.")
 
-        normalized_email = self.normalize_email_value(email)
-        if extra_fields.get("role") is None:
-            extra_fields["role"] = Role.objects.get(code=Role.CODE_ADMIN)
-        user = self.model(email=normalized_email, **extra_fields)
+        email = self.normalize_email(email).lower()
+
+        user = self.model(
+            email=email,
+            **extra_fields,
+        )
+
         user.set_password(password)
         user.save(using=self._db)
+
         return user
 
-    def create_user(self, email: str, password: str | None = None, **extra_fields):
-        extra_fields.setdefault("is_staff", False)
-        extra_fields.setdefault("is_superuser", False)
-        extra_fields.setdefault("is_active", True)
-        extra_fields.setdefault("is_email_verified", False)
-
-        if password is None:
-            raise ValueError("Users must have a password.")
-
-        return self._create_user(email, password, **extra_fields)
-
-    def create_superuser(self, email: str, password: str, **extra_fields):
+    def create_superuser(
+        self,
+        email: str,
+        password: str | None = None,
+        **extra_fields: Any,
+    ):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
-        extra_fields.setdefault("is_email_verified", True)
+        extra_fields.setdefault("is_verified", True)
 
-        return self._create_user(email, password, **extra_fields)
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+
+        return self.create_user(
+            email=email,
+            password=password,
+            **extra_fields,
+        )
