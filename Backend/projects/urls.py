@@ -18,4 +18,5 @@ urlpatterns = [
         ProjectDetailAPIView.as_view(),
         name="project-detail",
     ),
+    
 ]

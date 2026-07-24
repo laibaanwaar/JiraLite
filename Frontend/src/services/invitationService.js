@@ -1,111 +1,198 @@
-import axios from 'axios'
-import { API_BASE } from './apiConfig.js'
-import { getAccessToken } from './authService.js'
+const API_BASE_URL =
+  "http://127.0.0.1:8000/api";
 
-function authHeaders(accessToken = getAccessToken()) {
-  return accessToken
-    ? {
+// ==========================================
+// GET ACCESS TOKEN
+// ==========================================
+//
+// Login.jsx stores authentication token:
+//
+// Remember Me checked:
+// -> localStorage
+//
+// Remember Me unchecked:
+// -> sessionStorage
+//
+// Therefore invitation APIs must check both.
+//
+const getAccessToken = () => {
+  return (
+    // localStorage
+    localStorage.getItem("access") ||
+    localStorage.getItem("accessToken") ||
+    localStorage.getItem("access_token") ||
+
+    // sessionStorage
+    sessionStorage.getItem("access") ||
+    sessionStorage.getItem("accessToken") ||
+    sessionStorage.getItem("access_token")
+  );
+};
+
+// ==========================================
+// FORMAT ERROR
+// ==========================================
+
+const getErrorMessage = (data) => {
+  if (!data) {
+    return "Unable to process invitation.";
+  }
+
+  if (typeof data === "string") {
+    return data;
+  }
+
+  if (data.message) {
+    return data.message;
+  }
+
+  if (data.detail) {
+    return data.detail;
+  }
+
+  if (typeof data === "object") {
+    const message = Object.entries(data)
+      .map(([field, value]) => {
+        const fieldName = field
+          .replaceAll("_", " ")
+          .replace(
+            /\b\w/g,
+            (letter) =>
+              letter.toUpperCase(),
+          );
+
+        const errorValue =
+          Array.isArray(value)
+            ? value.join(" ")
+            : String(value);
+
+        return `${fieldName}: ${errorValue}`;
+      })
+      .join(" ");
+
+    if (message) {
+      return message;
+    }
+  }
+
+  return "Unable to process invitation.";
+};
+
+// ==========================================
+// AUTHENTICATED REQUEST
+// ==========================================
+
+const invitationRequest = async (
+  url,
+  options = {},
+) => {
+  const accessToken =
+    getAccessToken();
+
+  if (!accessToken) {
+    throw new Error(
+      "Please log in with the invited email address before responding.",
+    );
+  }
+
+  const response = await fetch(
+    url,
+    {
+      ...options,
+
+      headers: {
+        Accept:
+          "application/json",
+
+        "Content-Type":
+          "application/json",
+
         Authorization: `Bearer ${accessToken}`,
-      }
-    : {}
-}
 
-function normalizeCollectionError(error, fallbackMessage) {
-  const responseData = error?.response?.data
-
-  if (typeof responseData === 'string' && responseData.trim()) {
-    return responseData
-  }
-
-  if (typeof responseData?.message === 'string' && responseData.message.trim()) {
-    return responseData.message
-  }
-
-  if (typeof responseData?.detail === 'string' && responseData.detail.trim()) {
-    return responseData.detail
-  }
-
-  const nestedError = responseData && typeof responseData === 'object'
-    ? Object.values(responseData).flat().find((value) => typeof value === 'string' && value.trim())
-    : ''
-
-  return nestedError || fallbackMessage
-}
-
-export function normalizeInvitationError(error, fallbackMessage = 'Unable to process the invitation right now.') {
-  const status = error?.response?.status
-  const message = normalizeCollectionError(error, fallbackMessage)
-  const normalizedMessage = message.toLowerCase()
-  const responseData = error?.response?.data
-
-  return {
-    fieldErrors: responseData && typeof responseData === 'object'
-      ? Object.fromEntries(
-          Object.entries(responseData)
-            .filter(([, value]) => Array.isArray(value) && value.length)
-            .map(([key, value]) => [key, value[0]]),
-        )
-      : {},
-    isAlreadyMember: normalizedMessage.includes('already a member') || normalizedMessage.includes('already member'),
-    isDuplicate: normalizedMessage.includes('already invited') || normalizedMessage.includes('duplicate'),
-    message,
-    status,
-  }
-}
-
-export async function getInvitation(token, options = {}) {
-  const response = await axios.get(`${API_BASE}/api/invitations/${encodeURIComponent(token)}/`, {
-    signal: options.signal,
-    timeout: options.timeout || 10000,
-  })
-  return response.data?.data || response.data
-}
-
-function buildInvitationAuthHeaders({ accessToken = getAccessToken(), includeAuth = false } = {}) {
-  return includeAuth ? authHeaders(accessToken) : {}
-}
-
-export async function acceptInvitation(token, payload = {}, options = {}) {
-  const response = await axios.post(
-    `${API_BASE}/api/invitations/${encodeURIComponent(token)}/accept/`,
-    payload,
-    {
-      headers: {
-        ...buildInvitationAuthHeaders(options),
-        'Content-Type': 'application/json',
+        ...options.headers,
       },
     },
-  )
+  );
 
-  return response.data
-}
+  let data = {};
 
-export async function rejectInvitation(token, options = {}) {
-  const response = await axios.post(
-    `${API_BASE}/api/invitations/${encodeURIComponent(token)}/reject/`,
-    {},
-    {
-      headers: {
-        ...buildInvitationAuthHeaders(options),
-        'Content-Type': 'application/json',
+  try {
+    data =
+      await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      getErrorMessage(data),
+    );
+  }
+
+  return data;
+};
+
+// ==========================================
+// ACCEPT INVITATION
+// POST /api/invitations/{token}/accept/
+// ==========================================
+
+export const acceptInvitation =
+  async (token) => {
+    if (!token?.trim()) {
+      throw new Error(
+        "Invitation token is missing.",
+      );
+    }
+
+    return invitationRequest(
+      `${API_BASE_URL}/invitations/${encodeURIComponent(
+        token.trim(),
+      )}/accept/`,
+      {
+        method: "POST",
+
+        body: JSON.stringify({}),
       },
-    },
-  )
+    );
+  };
 
-  return response.data
-}
+// ==========================================
+// DECLINE INVITATION
+// POST /api/invitations/{token}/decline/
+// ==========================================
 
-export async function sendProjectInvitation(projectId, payload, accessToken = getAccessToken()) {
-  const response = await axios.post(
-    `${API_BASE}/api/projects/${projectId}/invitations/`,
-    payload,
-    {
-      headers: {
-        ...authHeaders(accessToken),
-        'Content-Type': 'application/json',
+export const declineInvitation =
+  async (token) => {
+    if (!token?.trim()) {
+      throw new Error(
+        "Invitation token is missing.",
+      );
+    }
+
+    return invitationRequest(
+      `${API_BASE_URL}/invitations/${encodeURIComponent(
+        token.trim(),
+      )}/decline/`,
+      {
+        method: "POST",
+
+        body: JSON.stringify({}),
       },
-    },
-  )
+    );
+  };
 
-  return response.data
-}
+// ==========================================
+// GET MY INVITATIONS
+// GET /api/invitations/
+// ==========================================
+
+export const getMyInvitations =
+  async () => {
+    return invitationRequest(
+      `${API_BASE_URL}/invitations/`,
+      {
+        method: "GET",
+      },
+    );
+  };

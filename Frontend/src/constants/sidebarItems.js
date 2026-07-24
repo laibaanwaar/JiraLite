@@ -9,9 +9,10 @@ export const sidebarItems = [
     path: "/projects",
     icon: "projects",
   },
-  {
-    label: "Invitations",
-    path: "/invitations",
-    icon: "invitations",
-  },
+  // Temporarily disabled
+  // {
+  //   label: "Invitations",
+  //   path: "/invitations",
+  //   icon: "invitations",
+  // },
 ];

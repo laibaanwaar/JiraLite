@@ -1,8 +1,10 @@
 import { useState } from "react";
+
 import {
   Link,
   useLocation,
   useNavigate,
+  useSearchParams,
 } from "react-router";
 
 import authService from "../services/authService";
@@ -11,24 +13,87 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  });
+  /*
+    ==========================================================
+    INVITATION REDIRECT SUPPORT
+    ==========================================================
 
-  const [rememberMe, setRememberMe] = useState(false);
-  const [error, setError] = useState("");
+    Normal login:
+    /login
+
+    Invitation login:
+    /login?redirect=/invitations/respond?token=ABC123
+
+    After successful login:
+    - If redirect exists -> return to invitation page
+    - Otherwise -> go to /dashboard
+  */
+  const [searchParams] =
+    useSearchParams();
+
+  const requestedRedirect =
+    searchParams.get("redirect");
+
+  /*
+    Only allow internal application paths.
+
+    Valid:
+    /invitations/respond?token=ABC
+
+    Invalid:
+    https://another-site.com
+    //another-site.com
+
+    Invalid redirects fall back to dashboard.
+  */
+  const redirectAfterLogin =
+    requestedRedirect?.startsWith("/") &&
+    !requestedRedirect.startsWith("//")
+      ? requestedRedirect
+      : "/dashboard";
+
+  /*
+    Detect whether the user arrived here
+    from an invitation link.
+
+    This is only used to show a helpful
+    message on the login screen.
+  */
+  const isInvitationLogin =
+    redirectAfterLogin.startsWith(
+      "/invitations/respond",
+    );
+
+  const [formData, setFormData] =
+    useState({
+      email: "",
+      password: "",
+    });
+
+  const [
+    rememberMe,
+    setRememberMe,
+  ] = useState(false);
+
+  const [error, setError] =
+    useState("");
 
   // This can show the success message passed from VerifyOtp.jsx
-  const [message, setMessage] = useState(
-    location.state?.message || "",
-  );
+  const [message, setMessage] =
+    useState(
+      location.state?.message || "",
+    );
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
 
-  // Handle email/password input
+  // ==========================================
+  // HANDLE EMAIL / PASSWORD INPUT
+  // ==========================================
+
   const handleChange = (event) => {
-    const { name, value } = event.target;
+    const { name, value } =
+      event.target;
 
     setFormData((prev) => ({
       ...prev,
@@ -39,30 +104,53 @@ const Login = () => {
     setMessage("");
   };
 
-  // Extract backend error messages
-  const getBackendErrorMessage = (errorData) => {
+  // ==========================================
+  // EXTRACT BACKEND ERROR MESSAGES
+  // ==========================================
+
+  const getBackendErrorMessage = (
+    errorData,
+  ) => {
     if (!errorData) {
       return "Login failed. Please try again.";
     }
 
     // Example:
     // { "message": "Invalid email or password." }
+
     if (errorData.message) {
       return errorData.message;
     }
 
     // Example:
+    //
     // {
-    //   "email": ["This field is required."]
+    //   "email": [
+    //     "This field is required."
+    //   ]
     // }
-    if (typeof errorData === "object") {
-      const firstError = Object.values(errorData)[0];
 
-      if (Array.isArray(firstError)) {
+    if (
+      typeof errorData ===
+      "object"
+    ) {
+      const firstError =
+        Object.values(
+          errorData,
+        )[0];
+
+      if (
+        Array.isArray(
+          firstError,
+        )
+      ) {
         return firstError[0];
       }
 
-      if (typeof firstError === "string") {
+      if (
+        typeof firstError ===
+        "string"
+      ) {
         return firstError;
       }
     }
@@ -70,14 +158,20 @@ const Login = () => {
     return "Login failed. Please check your email and password.";
   };
 
-  // Login API integration
-  const handleSubmit = async (event) => {
+  // ==========================================
+  // LOGIN API INTEGRATION
+  // ==========================================
+
+  const handleSubmit = async (
+    event,
+  ) => {
     event.preventDefault();
 
     setError("");
     setMessage("");
 
     // Frontend validation
+
     if (
       !formData.email.trim() ||
       !formData.password
@@ -85,6 +179,7 @@ const Login = () => {
       setError(
         "Please enter your email and password.",
       );
+
       return;
     }
 
@@ -92,11 +187,14 @@ const Login = () => {
       setLoading(true);
 
       // Exact payload expected by Django backend
+
       const payload = {
         email: formData.email
           .trim()
           .toLowerCase(),
-        password: formData.password,
+
+        password:
+          formData.password,
       };
 
       /*
@@ -110,7 +208,9 @@ const Login = () => {
       */
 
       const response =
-        await authService.login(payload);
+        await authService.login(
+          payload,
+        );
 
       /*
         Expected backend response:
@@ -133,15 +233,19 @@ const Login = () => {
         }
       */
 
-      const user = response?.data?.user;
+      const user =
+        response?.data?.user;
 
       const accessToken =
-        response?.data?.tokens?.access;
+        response?.data?.tokens
+          ?.access;
 
       const refreshToken =
-        response?.data?.tokens?.refresh;
+        response?.data?.tokens
+          ?.refresh;
 
       // Validate expected backend response
+
       if (
         !user ||
         !accessToken ||
@@ -165,17 +269,35 @@ const Login = () => {
       */
 
       // Clear any previous authentication data first
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("user");
 
-      sessionStorage.removeItem("access_token");
-      sessionStorage.removeItem("refresh_token");
-      sessionStorage.removeItem("user");
+      localStorage.removeItem(
+        "access_token",
+      );
 
-      const storage = rememberMe
-        ? localStorage
-        : sessionStorage;
+      localStorage.removeItem(
+        "refresh_token",
+      );
+
+      localStorage.removeItem(
+        "user",
+      );
+
+      sessionStorage.removeItem(
+        "access_token",
+      );
+
+      sessionStorage.removeItem(
+        "refresh_token",
+      );
+
+      sessionStorage.removeItem(
+        "user",
+      );
+
+      const storage =
+        rememberMe
+          ? localStorage
+          : sessionStorage;
 
       storage.setItem(
         "access_token",
@@ -193,22 +315,43 @@ const Login = () => {
       );
 
       // Remove OTP email if still present
+
       sessionStorage.removeItem(
         "verification_email",
       );
 
       /*
-        After successful login.
+        ======================================================
+        AFTER SUCCESSFUL LOGIN
+        ======================================================
 
-        Change "/dashboard" if your actual
-        dashboard route has another path.
+        Normal login:
+
+        /login
+              ↓
+        /dashboard
+
+
+        Invitation login:
+
+        /login?redirect=/invitations/respond?token=ABC
+              ↓
+        Successful login
+              ↓
+        /invitations/respond?token=ABC
+
+        The invitation token therefore remains preserved.
       */
 
-      navigate("/dashboard", {
-        replace: true,
-      });
+      navigate(
+        redirectAfterLogin,
+        {
+          replace: true,
+        },
+      );
     } catch (err) {
       // Backend returned 400, 401, 403, etc.
+
       if (err.response) {
         setError(
           getBackendErrorMessage(
@@ -220,6 +363,7 @@ const Login = () => {
       }
 
       // Backend did not respond
+
       if (err.request) {
         setError(
           "Unable to connect to the backend. Make sure the Django server is running.",
@@ -238,24 +382,32 @@ const Login = () => {
 
   return (
     <div className="relative flex min-h-screen overflow-hidden bg-[#06152F]">
-      {/* Background effects */}
+
+      {/* =====================================
+          BACKGROUND EFFECTS
+      ====================================== */}
 
       <div className="pointer-events-none absolute -left-52 top-0 h-[600px] w-[600px] rounded-full bg-blue-600/25 blur-[150px]" />
 
       <div className="pointer-events-none absolute right-0 top-[30%] h-[450px] w-[450px] rounded-full bg-blue-400/10 blur-[130px]" />
 
-      {/* Left Branding */}
+      {/* =====================================
+          LEFT BRANDING
+      ====================================== */}
 
       <div className="relative hidden w-1/2 items-center justify-center p-14 lg:flex">
         <div className="relative z-10 max-w-lg">
+
           <Link
             to="/"
             className="inline-flex items-center gap-3"
           >
             <div className="relative h-11 w-11">
+
               <div className="absolute left-[8px] top-[3px] h-8 w-8 rotate-45 rounded-md bg-gradient-to-br from-blue-400 to-blue-700" />
 
               <div className="absolute left-[16px] top-[11px] h-4 w-4 rotate-45 bg-white" />
+
             </div>
 
             <span className="text-3xl font-black text-white">
@@ -268,16 +420,18 @@ const Login = () => {
 
           <h1 className="mt-12 text-5xl font-black leading-tight tracking-[-2px] text-white">
             Welcome back to your{" "}
+
             <span className="text-blue-400">
               workspace.
             </span>
           </h1>
 
           <p className="mt-6 text-lg leading-8 text-slate-300">
-            Sign in to manage your projects,
-            check assigned tasks, collaborate
-            with your team, and continue where
-            you left off.
+            Sign in to manage your
+            projects, check assigned
+            tasks, collaborate with your
+            team, and continue where you
+            left off.
           </p>
 
           {/* 3D Task Card */}
@@ -290,6 +444,7 @@ const Login = () => {
             }}
           >
             <div className="flex items-center justify-between">
+
               <div>
                 <p className="font-extrabold text-white">
                   Website Redesign
@@ -303,6 +458,7 @@ const Login = () => {
               <span className="rounded-lg bg-emerald-500/20 px-3 py-1 text-sm font-bold text-emerald-300">
                 Active
               </span>
+
             </div>
 
             <div className="mt-6 h-2.5 overflow-hidden rounded-full bg-white/15">
@@ -312,14 +468,19 @@ const Login = () => {
             <p className="mt-3 text-sm font-semibold text-slate-300">
               72% completed
             </p>
+
           </div>
         </div>
       </div>
 
-      {/* Login Form */}
+      {/* =====================================
+          LOGIN FORM
+      ====================================== */}
 
       <div className="relative z-10 flex min-h-screen w-full items-center justify-center px-5 py-10 lg:w-1/2 lg:bg-slate-50">
+
         <div className="w-full max-w-[470px] rounded-[28px] border border-white/20 bg-white p-7 shadow-[0_40px_100px_rgba(0,0,0,0.28)] sm:p-10">
+
           {/* Mobile Logo */}
 
           <Link
@@ -327,6 +488,7 @@ const Login = () => {
             className="mb-8 flex justify-center text-3xl font-black text-[#172B4D] lg:hidden"
           >
             Jira
+
             <span className="text-[#0C66E4]">
               Lite
             </span>
@@ -337,10 +499,34 @@ const Login = () => {
           </h2>
 
           <p className="mt-3 text-center text-slate-500">
-            Log in to continue to your workspace.
+            Log in to continue to your
+            workspace.
           </p>
 
-          {/* OTP Verification Success Message */}
+          {/* =====================================
+              INVITATION LOGIN INFORMATION
+          ====================================== */}
+
+          {isInvitationLogin && (
+            <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-center">
+              <p className="text-sm font-semibold leading-6 text-blue-700">
+                Log in using the same
+                email address that
+                received the project
+                invitation.
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-blue-600">
+                After login, you will
+                automatically return to
+                the invitation page.
+              </p>
+            </div>
+          )}
+
+          {/* =====================================
+              OTP VERIFICATION SUCCESS MESSAGE
+          ====================================== */}
 
           {message && (
             <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-700">
@@ -348,7 +534,9 @@ const Login = () => {
             </div>
           )}
 
-          {/* Login Error */}
+          {/* =====================================
+              LOGIN ERROR
+          ====================================== */}
 
           {error && (
             <div
@@ -363,9 +551,13 @@ const Login = () => {
             onSubmit={handleSubmit}
             className="mt-8 space-y-5"
           >
-            {/* Email */}
+
+            {/* =====================================
+                EMAIL
+            ====================================== */}
 
             <div>
+
               <label
                 htmlFor="email"
                 className="mb-2 block text-sm font-bold text-[#172B4D]"
@@ -380,17 +572,26 @@ const Login = () => {
                 required
                 autoComplete="email"
                 placeholder="name@example.com"
-                value={formData.email}
-                onChange={handleChange}
+                value={
+                  formData.email
+                }
+                onChange={
+                  handleChange
+                }
                 disabled={loading}
                 className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3.5 outline-none transition-all placeholder:text-slate-400 focus:border-[#0C66E4] focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               />
+
             </div>
 
-            {/* Password */}
+            {/* =====================================
+                PASSWORD
+            ====================================== */}
 
             <div>
+
               <div className="mb-2 flex items-center justify-between">
+
                 <label
                   htmlFor="password"
                   className="text-sm font-bold text-[#172B4D]"
@@ -404,6 +605,7 @@ const Login = () => {
                 >
                   Forgot password?
                 </button>
+
               </div>
 
               <input
@@ -413,23 +615,34 @@ const Login = () => {
                 required
                 autoComplete="current-password"
                 placeholder="Enter your password"
-                value={formData.password}
-                onChange={handleChange}
+                value={
+                  formData.password
+                }
+                onChange={
+                  handleChange
+                }
                 disabled={loading}
                 className="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3.5 outline-none transition-all placeholder:text-slate-400 focus:border-[#0C66E4] focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               />
+
             </div>
 
-            {/* Remember Me */}
+            {/* =====================================
+                REMEMBER ME
+            ====================================== */}
 
             <div className="flex items-center gap-2">
+
               <input
                 id="remember"
                 type="checkbox"
-                checked={rememberMe}
+                checked={
+                  rememberMe
+                }
                 onChange={(event) =>
                   setRememberMe(
-                    event.target.checked,
+                    event.target
+                      .checked,
                   )
                 }
                 disabled={loading}
@@ -442,9 +655,12 @@ const Login = () => {
               >
                 Remember me
               </label>
+
             </div>
 
-            {/* Login Button */}
+            {/* =====================================
+                LOGIN BUTTON
+            ====================================== */}
 
             <button
               type="submit"
@@ -453,12 +669,16 @@ const Login = () => {
             >
               {loading
                 ? "Logging in..."
-                : "Log in"}
+                : isInvitationLogin
+                  ? "Log in and continue"
+                  : "Log in"}
             </button>
+
           </form>
 
           <p className="mt-7 text-center text-sm text-slate-600">
             Don't have an account?{" "}
+
             <Link
               to="/signup"
               className="font-extrabold text-[#0C66E4] hover:underline"
@@ -468,13 +688,16 @@ const Login = () => {
           </p>
 
           <div className="mt-5 text-center">
+
             <Link
               to="/"
               className="text-sm font-semibold text-slate-500 transition-colors hover:text-[#0C66E4]"
             >
               ← Back to home
             </Link>
+
           </div>
+
         </div>
       </div>
     </div>

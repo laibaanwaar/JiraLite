@@ -4,7 +4,6 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import (
-    APIException,
     NotFound,
     PermissionDenied,
 )
@@ -219,15 +218,46 @@ def get_project_tasks(
 ):
     project = _get_project(project_id)
 
-    # Full project task list is Admin-only.
-    _ensure_project_admin(
-        project=project,
-        user=requesting_user,
+    """
+    Task visibility rules:
+
+    - ACTIVE Project Admin:
+      can see all tasks in the project.
+
+    - ACTIVE Project Member:
+      can see only tasks assigned to themselves.
+
+    - Non-member / inactive member:
+      access is denied.
+    """
+
+    membership = (
+        ProjectMember.objects
+        .filter(
+            project=project,
+            user=requesting_user,
+            status=ProjectMember.Status.ACTIVE,
+        )
+        .first()
     )
 
+    if membership is None:
+        raise PermissionDenied(
+            "You are not an active member of this project."
+        )
+
+    if membership.role == ProjectMember.Role.ADMIN:
+        tasks = Task.objects.filter(
+            project=project,
+        )
+    else:
+        tasks = Task.objects.filter(
+            project=project,
+            assigned_to=requesting_user,
+        )
+
     tasks = (
-        Task.objects
-        .filter(project=project)
+        tasks
         .select_related(
             "project",
             "assigned_to",
@@ -241,7 +271,6 @@ def get_project_tasks(
     )
 
     return project, tasks
-
 
 def get_accessible_task(
     task_id,

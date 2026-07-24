@@ -71,3 +71,4 @@ class EmailVerificationOTP(models.Model):
 
     def __str__(self) -> str:
         return f"OTP for {self.user.email}"
+        
